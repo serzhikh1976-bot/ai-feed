@@ -14,8 +14,18 @@ export async function callMock({ user }) {
     return 'это не JSON, а имитация сбоя ИИ для проверки retry-логики';
   }
 
+  // Второй (узкий) промпт — выбор categoryId из списка кандидатов. Отличаем по маркеру в тексте.
+  if (user.includes('categoryId')) {
+    const idMatch = user.match(/id="([^"]+)"/); // берём первый предложенный кандидат — этого достаточно для мока
+    const categoryId = idMatch ? idMatch[1] : '1';
+    return JSON.stringify({ categoryId });
+  }
+
   const skuMatch = user.match(/Артикул:\s*(\S+)/);
   const sku = skuMatch ? skuMatch[1] : 'UNKNOWN';
+  // Список категорий идёт ПОСЛЕ маркера — иначе регэксп цепляет "- Артикул: ..." из блока данных товара.
+  const afterMarker = user.split('Список верхнеуровневых категорий маркетплейса')[1] || '';
+  const topLevelMatch = afterMarker.match(/- ([^\n]+)\n/);
 
   return JSON.stringify({
     name: `[MOCK] Товар ${sku} — назва українською`,
@@ -24,5 +34,6 @@ export async function callMock({ user }) {
       { name: 'Виробник', value: 'No Name' },
       { name: 'Тестовий параметр', value: 'значення' },
     ],
+    categoryTopLevel: topLevelMatch ? topLevelMatch[1].trim() : 'Товари, загальне',
   });
 }

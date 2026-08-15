@@ -147,8 +147,12 @@
   button.download {
     margin-top: 16px; width: 100%; padding: 13px; border-radius: 10px;
     border: 1px solid var(--border); background: transparent; color: var(--muted);
-    font-size: 14px; cursor: not-allowed;
+    font-size: 14px; cursor: not-allowed; transition: all .15s;
   }
+  button.download:not(:disabled) {
+    cursor: pointer; border-color: var(--success); color: var(--success);
+  }
+  button.download:not(:disabled):hover { background: #123829; }
 </style>
 </head>
 <body>
@@ -187,8 +191,8 @@
 
     <div class="log" id="log"></div>
 
-    <button class="download" id="downloadBtn" disabled title="Появится после реализации этапа генерации XML">
-      Скачать XML-фид (появится после этапа 3)
+    <button class="download" id="downloadBtn" disabled>
+      Скачать XML-фид
     </button>
   </div>
 </div>
@@ -210,8 +214,10 @@ const cSuccess = document.getElementById('cSuccess');
 const cWarning = document.getElementById('cWarning');
 const cError = document.getElementById('cError');
 
+const downloadBtn = document.getElementById('downloadBtn');
 let selectedFile = null;
 let pollTimer = null;
+let currentRequestId = null;
 
 dropzone.addEventListener('click', () => fileInput.click());
 dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
@@ -274,6 +280,9 @@ uploadBtn.addEventListener('click', async () => {
 });
 
 function startPolling(requestId, totalItems) {
+  currentRequestId = requestId;
+  downloadBtn.disabled = true;
+  downloadBtn.textContent = 'Скачать XML-фид';
   if (pollTimer) clearInterval(pollTimer);
   poll(requestId, totalItems);
   pollTimer = setInterval(() => poll(requestId, totalItems), 2000);
@@ -287,6 +296,9 @@ async function poll(requestId, totalItems) {
     renderJob(job, totalItems);
     if (job.status === 'completed' || job.status === 'failed') {
       clearInterval(pollTimer);
+    }
+    if (job.status === 'completed' && (job.counts.success + job.counts.warning) > 0) {
+      downloadBtn.disabled = false;
     }
   } catch (err) {
     // сеть моргнула — просто ждём следующего тика polling
@@ -326,6 +338,11 @@ function renderJob(job, totalItems) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+
+downloadBtn.addEventListener('click', () => {
+  if (!currentRequestId || downloadBtn.disabled) return;
+  window.location.href = `/api/jobs/${currentRequestId}/download`;
+});
 </script>
 </body>
 </html>

@@ -8,6 +8,7 @@ import { parseSpreadsheet } from './parser.js';
 import { mapColumns, applyMapping } from './columnMapper.js';
 import { createJob, getJob, toPublicJob } from './jobStore.js';
 import { processJob } from './processor.js';
+import { buildYmlFeed, countFeedItems } from './xmlBuilder.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 МБ — см. ТЗ, валидация загрузки
@@ -76,6 +77,30 @@ fastify.get('/api/jobs/:id', async (request, reply) => {
     return reply.code(404).send({ error: 'Задача не найдена' });
   }
   return toPublicJob(job);
+});
+
+// Скачивание готового XML-фида — доступно только для завершённых job'ов.
+fastify.get('/api/jobs/:id/download', async (request, reply) => {
+  const job = getJob(request.params.id);
+  if (!job) {
+    return reply.code(404).send({ error: 'Задача не найдена' });
+  }
+  if (job.status !== 'completed') {
+    return reply.code(409).send({ error: `Задача ещё не завершена (статус: ${job.status})` });
+  }
+  const publicJob = toPublicJob(job);
+  if (countFeedItems(publicJob) === 0) {
+    return reply.code(422).send({ error: 'Ни один товар не попал в фид (все со статусом error) — скачивать нечего' });
+  }
+
+  const xml = buildYmlFeed(publicJob, {
+    defaultCategoryId: process.env.DEFAULT_CATEGORY_ID || '1',
+  });
+
+  reply
+    .header('Content-Type', 'application/xml; charset=utf-8')
+    .header('Content-Disposition', 'attachment; filename="feed.xml"')
+    .send(xml);
 });
 
 const port = process.env.PORT || 3000;

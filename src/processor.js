@@ -1,8 +1,11 @@
 import { getJob, updateJob, setItemResult, JOB_STATUS, ITEM_STATUS } from './jobStore.js';
 import { isValidImageUrl } from './columnMapper.js';
-import { generateProductContent } from './aiClient.js';
+import { generateProductContent, selectCategory } from './aiClient.js';
+import { getTopLevelCategories, getBranchCandidates, getCategoryCandidates, getCategoryDirectoryStatus } from './categoryDirectory.js';
 
 const PLACEHOLDER_IMAGE = 'https://your-service.com/placeholder.jpg';
+const CATEGORY_FILE = process.env.CATEGORY_DIRECTORY_FILE || './data/prom_categories.xls';
+const DEFAULT_CATEGORY_ID = process.env.DEFAULT_CATEGORY_ID || '1';
 
 const AI_CONFIG = {
   provider: process.env.AI_PROVIDER || 'mock',
@@ -10,6 +13,14 @@ const AI_CONFIG = {
   model: process.env.AI_MODEL, // если не задано — провайдер использует дефолт из ТЗ
   brand: process.env.DEFAULT_BRAND || null,
 };
+
+const categoryDirStatus = getCategoryDirectoryStatus(CATEGORY_FILE);
+const topLevelCategories = categoryDirStatus.available ? getTopLevelCategories(CATEGORY_FILE) : [];
+if (!categoryDirStatus.available) {
+  // Известное ограничение MVP (см. ТЗ 3.5): без справочника все товары получают один
+  // дефолтный categoryId. Не тихая заглушка — предупреждение видно в логе сервера при старте.
+  console.warn(`[categories] Справочник не найден по пути "${CATEGORY_FILE}" — используется DEFAULT_CATEGORY_ID="${DEFAULT_CATEGORY_ID}" для всех товаров.`);
+}
 
 // Небольшая пауза между СТРОКАМИ (не между ретраями одной строки — та задержка внутри aiClient)
 // нужна, чтобы не упереться в rate limit при последовательной обработке 20 товаров.
@@ -44,6 +55,55 @@ function resolveImage(raw) {
   return { resolvedImage: PLACEHOLDER_IMAGE, imageWarning: warning };
 }
 
+/**
+ * Определяет categoryId для товара. Цепочка fallback'ов (см. ТЗ 3.5):
+ * 1. Справочник недоступен вообще -> DEFAULT_CATEGORY_ID (известное ограничение MVP).
+ * 2. Ветка от ИИ (categoryTopLevel) не найдена в справочнике (галлюцинация/опечатка) ->
+ *    ищем кандидатов по всему справочнику вместо одной ветки.
+ * 3. Кандидатов для второго AI-вызова нет вообще -> DEFAULT_CATEGORY_ID.
+ * 4. Второй AI-вызов (selectCategory) не смог выбрать после ретраев -> берём топ-1
+ *    кандидата локально (уже отобранного keyword-поиском) вместо полного отказа.
+ * Ни один из этих случаев не должен провалить товар целиком — category — это одно
+ * поле фида, а не весь результат.
+ */
+async function resolveCategory(generated, raw) {
+  if (!categoryDirStatus.available) {
+    return { categoryId: DEFAULT_CATEGORY_ID, categoryPath: null, warning: 'Справочник категорий не подключён — использована категория по умолчанию' };
+  }
+
+  const productText = `${generated.name} ${generated.description}`;
+  let candidates = getBranchCandidates(productText, CATEGORY_FILE, generated.categoryTopLevel, 12);
+
+  let warningPrefix = null;
+  if (candidates.length === 0) {
+    // ИИ вернул ветку, которой нет в справочнике — не подгоняем, честно откатываемся на полный поиск.
+    candidates = getCategoryCandidates(productText, CATEGORY_FILE, 15);
+    warningPrefix = `ИИ вернул неизвестную ветку категорий ("${generated.categoryTopLevel}") — выполнен поиск по всему справочнику`;
+  }
+
+  if (candidates.length === 0) {
+    return { categoryId: DEFAULT_CATEGORY_ID, categoryPath: null, warning: 'Не найдено ни одного кандидата категории — использована категория по умолчанию' };
+  }
+
+  try {
+    const categoryId = await selectCategory(generated.name, generated.description, candidates, {
+      provider: AI_CONFIG.provider,
+      apiKey: AI_CONFIG.apiKey,
+      model: AI_CONFIG.model,
+    });
+    const chosen = candidates.find((c) => c.id === categoryId);
+    return { categoryId, categoryPath: chosen?.path ?? null, warning: warningPrefix };
+  } catch (err) {
+    // Второй AI-вызов не справился — не проваливаем товар, берём лучший локальный кандидат.
+    const fallback = candidates[0];
+    return {
+      categoryId: fallback.id,
+      categoryPath: fallback.path,
+      warning: `Автовыбор категории не удался (${err.message}) — использован ближайший найденный вариант, стоит проверить`,
+    };
+  }
+}
+
 /** Запускает фоновую обработку job'а. Не await'ится вызывающим кодом (fire-and-forget). */
 export async function processJob(jobId) {
   const job = getJob(jobId);
@@ -68,19 +128,28 @@ export async function processJob(jobId) {
       try {
         const generated = await generateProductContent(raw, {
           brand: AI_CONFIG.brand,
+          topLevelCategories,
           provider: AI_CONFIG.provider,
           apiKey: AI_CONFIG.apiKey,
           model: AI_CONFIG.model,
         });
 
+        // Шаг 3: выбор категории. Не валит весь товар при неудаче — name/description уже
+        // готовы и это самое ценное; при сбое категоризации используем честный fallback
+        // и понижаем статус до warning, а не выбрасываем результат целиком.
+        const categoryResult = await resolveCategory(generated, raw);
+
+        const warnings = [imageWarning, categoryResult.warning].filter(Boolean);
         setItemResult(jobId, i, {
           ...raw,
-          status: imageWarning ? ITEM_STATUS.WARNING : ITEM_STATUS.SUCCESS,
-          message: imageWarning,
+          status: warnings.length > 0 ? ITEM_STATUS.WARNING : ITEM_STATUS.SUCCESS,
+          message: warnings.length > 0 ? warnings.join(' | ') : null,
           resolvedImage,
           generatedName: generated.name,
           generatedDescription: generated.description,
           generatedParams: generated.params,
+          categoryId: categoryResult.categoryId,
+          categoryPath: categoryResult.categoryPath,
         });
       } catch (aiErr) {
         setItemResult(jobId, i, {
