@@ -56,15 +56,19 @@ ${categoryList}
  * Отдельный от основного промпта вызов — дороже на одно обращение к API, но сам список
  * короткий (10-15 категорий), так что расход токенов на этот шаг небольшой.
  */
-export function buildCategorySelectionPrompt(generatedName, generatedDescription, candidates) {
+export function buildCategorySelectionPrompt(generatedName, generatedDescription, candidates, { previousSelections = [] } = {}) {
   const list = candidates.map((c) => `- id="${c.id}": ${c.path.join(' > ')}`).join('\n');
+
+  const consistencyBlock = previousSelections.length > 0
+    ? `\nРанее в цьому ж прогоні для схожих товарів (той самий бренд або тип) вже були обрані такі категорії:\n${previousSelections.map((p) => `- "${p.name}" → id="${p.categoryId}"`).join('\n')}\nЯкщо поточний товар справді того самого типу/бренду і один із перелічених вище id є серед кандидатів нижче — віддай перевагу йому заради узгодженості категорій у межах партії. Але якщо жоден із запропонованих кандидатів не підходить так само точно, як раніше — обирай за змістом, не підганяй штучно.\n`
+    : '';
 
   const system = `Ти обираєш найбільш підходящу категорію маркетплейсу для товару.
 ОБОВ'ЯЗКОВО відповідай ТІЛЬКИ валідним JSON без markdown-розмітки і пояснень.`;
 
   const user = `Товар: "${generatedName}"
 Опис: ${stripHtml(generatedDescription)}
-
+${consistencyBlock}
 Список кандидатів категорій (обери ОДИН, найбільш точний за змістом):
 ${list}
 

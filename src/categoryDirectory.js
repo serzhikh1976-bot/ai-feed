@@ -116,10 +116,18 @@ function hasStemMatch(wordList, queryStem) {
   return wordList.some((w) => w.stem === queryStem && w.stem.length >= 3);
 }
 
-function scoreCategories(categories, productText) {
-  const queryTokensRaw = expandSynonyms(tokenize(productText));
-  if (queryTokensRaw.size === 0) return [];
-  const queryTokens = [...queryTokensRaw].map((qt) => ({ token: qt, stem: stripSuffix(qt) }));
+function scoreCategories(categories, nameText, descriptionText = '') {
+  const nameTokensRaw = expandSynonyms(tokenize(nameText));
+  const descTokensRaw = expandSynonyms(tokenize(descriptionText));
+  // Слово, встретившееся и в названии, и в описании — учитываем один раз с весом названия
+  // (не даём описанию "перебить" сигнал названия дублированием тех же слов).
+  const descOnlyTokens = [...descTokensRaw].filter((t) => !nameTokensRaw.has(t));
+
+  if (nameTokensRaw.size === 0 && descOnlyTokens.length === 0) return [];
+
+  const nameTokens = [...nameTokensRaw].map((qt) => ({ token: qt, stem: stripSuffix(qt), weight: 1 }));
+  const descTokens = descOnlyTokens.map((qt) => ({ token: qt, stem: stripSuffix(qt), weight: 0.4 }));
+  const queryTokens = [...nameTokens, ...descTokens];
 
   const scored = categories.map((cat) => {
     const leafNorm = normalize(cat.leafName);
@@ -128,15 +136,15 @@ function scoreCategories(categories, productText) {
     const fullWords = wordsWithStems(fullNorm);
 
     let score = 0;
-    for (const { token: qt, stem: qStem } of queryTokens) {
+    for (const { token: qt, stem: qStem, weight } of queryTokens) {
       if (hasWholeWordMatch(leafNorm, qt)) {
-        score += 3; // точное совпадение целого слова в листовой категории — самый сильный сигнал
+        score += 3 * weight; // точное совпадение целого слова в листовой категории — самый сильный сигнал
       } else if (hasWholeWordMatch(fullNorm, qt)) {
-        score += 1; // точное совпадение где-то в хлебных крошках
+        score += 1 * weight; // точное совпадение где-то в хлебных крошках
       } else if (qt.length >= 5 && hasStemMatch(leafWords, qStem)) {
-        score += 2; // совпадение по корню слова в листовой категории (словоформа: куртка/куртки)
+        score += 2 * weight; // совпадение по корню слова в листовой категории (словоформа: куртка/куртки)
       } else if (qt.length >= 5 && hasStemMatch(fullWords, qStem)) {
-        score += 0.5; // совпадение по корню где-то в хлебных крошках — слабый сигнал
+        score += 0.5 * weight; // совпадение по корню где-то в хлебных крошках — слабый сигнал
       }
     }
     return { cat, score };
@@ -149,11 +157,12 @@ function scoreCategories(categories, productText) {
  * Отбирает top-N кандидатов категорий под товар по пересечению ключевых слов
  * названия+описания с полным путём категории (leaf-название весит больше, чем
  * верхние уровни иерархии — совпадение в конкретном подразделе значимее, чем
- * в общем разделе типа "Техніка та електроніка").
+ * в общем разделе типа "Техніка та електроніка"). Слова из name весят больше слов
+ * из description (название точнее описывает суть товара, чем свободный текст описания).
  */
-export function getCategoryCandidates(productText, filePath, limit = 20) {
+export function getCategoryCandidates(nameText, descriptionText, filePath, limit = 30) {
   const categories = loadCategoryDirectory(filePath);
-  const ranked = scoreCategories(categories, productText);
+  const ranked = scoreCategories(categories, nameText, descriptionText);
   const topCandidates = ranked.slice(0, limit).map((s) => s.cat);
   addGenericFallback(topCandidates, categories);
   return topCandidates;
@@ -164,12 +173,12 @@ export function getCategoryCandidates(productText, filePath, limit = 20) {
  * без второго обращения на этом шаге). Внутри узкой ветки (50-300 категорий вместо 5822)
  * список короче и точнее, что делает второй (уже category-only) AI-вызов дешевле.
  */
-export function getBranchCandidates(productText, filePath, topLevel, limit = 12) {
+export function getBranchCandidates(nameText, descriptionText, filePath, topLevel, limit = 30) {
   const categories = loadCategoryDirectory(filePath);
   const branchCategories = categories.filter((c) => c.path[0] === topLevel);
   if (branchCategories.length === 0) return []; // ИИ вернул несуществующую ветку — откат на caller
 
-  const ranked = scoreCategories(branchCategories, productText);
+  const ranked = scoreCategories(branchCategories, nameText, descriptionText);
   const topCandidates = ranked.slice(0, limit).map((s) => s.cat);
   addGenericFallback(topCandidates, branchCategories, topLevel);
 
@@ -198,7 +207,7 @@ function addGenericFallback(topCandidates, poolCategories, forcedTopLevel = null
 }
 
 /** Оставлено для обратной совместимости / отладки (полный поиск по всему справочнику без ветки). */
-export function getBestCategoryInBranch(productText, filePath, topLevel) {
-  const candidates = getBranchCandidates(productText, filePath, topLevel, 1);
+export function getBestCategoryInBranch(nameText, descriptionText, filePath, topLevel) {
+  const candidates = getBranchCandidates(nameText, descriptionText, filePath, topLevel, 1);
   return candidates[0] || null;
 }

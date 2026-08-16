@@ -114,11 +114,11 @@ export async function generateProductContent(item, { brand, topLevelCategories, 
  * раздел 3.5: точность важнее экономии, но список короткий, поэтому вызов дешёвый).
  * Та же retry-логика, что и у основного вызова.
  */
-export async function selectCategory(generatedName, generatedDescription, candidates, { provider, apiKey, model } = {}) {
+export async function selectCategory(generatedName, generatedDescription, candidates, { provider, apiKey, model, previousSelections } = {}) {
   if (candidates.length === 0) {
     throw new Error('Список кандидатов категорий пуст — нечего выбирать');
   }
-  const prompt = buildCategorySelectionPrompt(generatedName, generatedDescription, candidates);
+  const prompt = buildCategorySelectionPrompt(generatedName, generatedDescription, candidates, { previousSelections });
   const callFn = getProviderFn(provider);
   const validIds = new Set(candidates.map((c) => c.id));
 
