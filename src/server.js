@@ -44,12 +44,12 @@ fastify.post('/api/upload', async (request, reply) => {
     return reply.code(400).send({ error: `Не удалось прочитать файл: ${err.message}` });
   }
 
-  const { mapping, missing } = mapColumns(parsed.headers);
-  if (missing.length > 0) {
-    return reply.code(400).send({
-      error: `Не найдены обязательные колонки: ${missing.join(', ')}. Проверьте заголовки файла.`,
-    });
-  }
+const { mapping, missing } = mapColumns(parsed.headers, parsed.rows);
+if (missing.length > 0) {
+  return reply.code(400).send({
+    error: `Не найдены обязательные колонки: ${missing.join(', ')}. Проверьте заголовки файла.`,
+  });
+}
 
   const rawItems = applyMapping(parsed.rows, mapping);
 

@@ -29,9 +29,9 @@ export async function callMock({ user }) {
 
   return JSON.stringify({
     name: `[MOCK] Товар ${sku} — назва українською`,
+    vendor: 'No Name',
     description: `<p>Це тестовий опис товару ${sku}, згенерований мок-провайдером для перевірки конвеєра без реального звернення до AI API.</p><ul><li>Тестова характеристика 1</li><li>Тестова характеристика 2</li></ul>`,
     params: [
-      { name: 'Виробник', value: 'No Name' },
       { name: 'Тестовий параметр', value: 'значення' },
     ],
     categoryTopLevel: topLevelMatch ? topLevelMatch[1].trim() : 'Товари, загальне',

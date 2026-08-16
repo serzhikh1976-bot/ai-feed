@@ -2,7 +2,13 @@ import { buildProductPrompt, buildCategorySelectionPrompt } from './promptBuilde
 import { callOpenAI, callGemini } from './aiProviders.js';
 import { callMock } from './mockProvider.js';
 
-const RETRY_DELAYS_MS = [1000, 3000]; // см. ТЗ 5.1: до 2 повторов, экспоненциальный рост
+const RETRY_DELAYS_MS = [2000, 5000]; // см. ТЗ 5.1: до 2 повторов, экспоненциальный рост
+
+// Официальный лимит Prom.ua на описание — 12160 символов (см. "Export Products Sheet",
+// поле Опис_укр). Это safety-cap от неадекватно длинного ответа ИИ, а не целевая длина —
+// промпт по-прежнему просит лаконичный текст, но раньше здесь стоял искусственный лимит
+// в 500 символов из черновика ТЗ, который был в 24 раза жёстче официального.
+const MAX_DESCRIPTION_LENGTH = 2000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -40,7 +46,7 @@ function parseAndValidate(rawText) {
   if (typeof parsed.description !== 'string' || !parsed.description.trim()) {
     throw new Error('В ответе ИИ отсутствует или пустое поле "description"');
   }
-  if (parsed.description.length > 500) {
+  if (parsed.description.length > MAX_DESCRIPTION_LENGTH) {
     // Обрезка "в лоб" может разорвать HTML-тег посередине (например, "<li>Компакт")
     // и сломать XML/валидатор маркетплейса. Обрезаем по границе последнего целого тега.
     parsed.description = truncateAtTagBoundary(parsed.description, 500);
@@ -51,9 +57,11 @@ function parseAndValidate(rawText) {
   if (typeof parsed.categoryTopLevel !== 'string' || !parsed.categoryTopLevel.trim()) {
     throw new Error('В ответе ИИ отсутствует или пустое поле "categoryTopLevel"');
   }
+  const vendor = typeof parsed.vendor === 'string' && parsed.vendor.trim() ? parsed.vendor.trim() : 'No Name';
 
   return {
     name: parsed.name.trim(),
+    vendor,
     description: parsed.description.trim(),
     params: parsed.params.filter((p) => p && p.name && p.value),
     categoryTopLevel: parsed.categoryTopLevel.trim(),

@@ -61,20 +61,28 @@ export function buildYmlFeed(job, opts = {}) {
       const paramsXml = (item.generatedParams || [])
         .map((p) => `        <param name="${escapeXml(p.name)}">${escapeXml(p.value)}</param>`)
         .join('\n');
+      const generatedName = item.generatedName || item.name;
+      const generatedDescription = item.generatedDescription || '';
 
-      return `      <offer id="${escapeXml(item.sku)}" available="true">
-        <name>${escapeXml(item.generatedName || item.name)}</name>
+      return `      <offer id="${escapeXml(item.sku)}" available="${item.available ? 'true' : 'false'}" selling_type="r">
+        <name>${escapeXml(generatedName)}</name>
+        <name_ua>${escapeXml(generatedName)}</name_ua>
         <price>${escapeXml(item.price)}</price>
         <currencyId>UAH</currencyId>
         <categoryId>${escapeXml(categoryId)}</categoryId>
+        <portal_category_id>${escapeXml(categoryId)}</portal_category_id>
+        <vendor>${escapeXml(item.vendor || 'No Name')}</vendor>
+        <vendorCode>${escapeXml(item.sku)}</vendorCode>
         <picture>${escapeXml(item.resolvedImage)}</picture>
-        <description>${wrapCdata(item.generatedDescription || '')}</description>
+        <description>${wrapCdata(generatedDescription)}</description>
+        <description_ua>${wrapCdata(generatedDescription)}</description_ua>
 ${paramsXml}
       </offer>`;
     })
     .join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE yml_catalog SYSTEM "shops.dtd">
 <yml_catalog date="${formatDate(new Date())}">
   <shop>
     <name>${escapeXml(shopName)}</name>

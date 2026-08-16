@@ -1,27 +1,52 @@
 import * as XLSX from 'xlsx';
+import { FIELD_KEYWORDS } from './columnMapper.js';
 
-/**
- * Парсит буфер файла (.xlsx, .xls, .csv) в { headers, rows }.
- * Строго берёт первые MAX_ROWS строк данных (защита от перерасхода AI API).
- */
 const MAX_ROWS = 20;
+
+function findHeaderRow(matrix) {
+  const skuWords = (FIELD_KEYWORDS.sku || []).map(w => w.toLowerCase());
+  const nameWords = (FIELD_KEYWORDS.name || []).map(w => w.toLowerCase());
+  const priceWords = (FIELD_KEYWORDS.price || []).map(w => w.toLowerCase());
+
+  for (let i = 0; i < matrix.length; i++) {
+    const row = matrix[i];
+    if (!row || row.length === 0) continue;
+
+    const cells = row.map(cell => String(cell ?? '').toLowerCase().trim());
+    if (cells.every(c => c === '')) continue;
+
+    console.log(`[parser] Проверка строки ${i}:`, cells.slice(0, 6));
+
+    const hasSku = cells.some(cell => skuWords.some(word => cell.includes(word)));
+    const hasName = cells.some(cell => nameWords.some(word => cell.includes(word)));
+    const hasPrice = cells.some(cell => priceWords.some(word => cell.includes(word)));
+
+    if (hasSku && hasName && hasPrice) {
+      console.log(`[parser] ✅ Найден заголовок на строке ${i}:`, cells.slice(0, 6));
+      return i;
+    }
+  }
+
+  console.warn('[parser] ❌ Заголовок не найден');
+  return -1;
+}
 
 export function parseSpreadsheet(buffer, filename) {
   const isCsv = /\.csv$/i.test(filename);
 
   let workbook;
   if (isCsv) {
-    // xlsx не всегда верно угадывает кодировку CSV без BOM — читаем как UTF-8 текст
-    // явно и парсим уже строку, а не сырой буфер.
     const text = buffer.toString('utf-8');
     workbook = XLSX.read(text, { type: 'string' });
   } else {
     workbook = XLSX.read(buffer, { type: 'buffer', codepage: 65001 });
   }
+
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) {
     throw new Error('Файл не содержит листов с данными');
   }
+
   const sheet = workbook.Sheets[sheetName];
   const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
 
@@ -29,8 +54,27 @@ export function parseSpreadsheet(buffer, filename) {
     throw new Error('Файл пустой');
   }
 
-  const headers = matrix[0].map((h) => String(h ?? '').trim());
-  const dataRows = matrix.slice(1).filter((row) => row.some((cell) => String(cell ?? '').trim() !== ''));
+  // 🔥 ЛОГИРОВАНИЕ: показываем первые 10 строк матрицы
+  console.log('[parser] Всего строк в матрице:', matrix.length);
+  console.log('[parser] Первые 10 строк матрицы:');
+  for (let i = 0; i < Math.min(10, matrix.length); i++) {
+    console.log(`  строка ${i}:`, matrix[i] ? matrix[i].slice(0, 6) : 'empty');
+  }
+
+  const headerIndex = findHeaderRow(matrix);
+  let headers, dataRows;
+
+  if (headerIndex !== -1) {
+    headers = matrix[headerIndex].map((h) => String(h ?? '').trim());
+    dataRows = matrix.slice(headerIndex + 1);
+  } else {
+    headers = matrix[0].map((h) => String(h ?? '').trim());
+    dataRows = matrix.slice(1);
+  }
+
+  dataRows = dataRows.filter((row) =>
+    row.some((cell) => String(cell ?? '').trim() !== '')
+  );
 
   const truncated = dataRows.length > MAX_ROWS;
   const limitedRows = dataRows.slice(0, MAX_ROWS);

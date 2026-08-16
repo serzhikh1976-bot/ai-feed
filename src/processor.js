@@ -3,7 +3,7 @@ import { isValidImageUrl } from './columnMapper.js';
 import { generateProductContent, selectCategory } from './aiClient.js';
 import { getTopLevelCategories, getBranchCandidates, getCategoryCandidates, getCategoryDirectoryStatus } from './categoryDirectory.js';
 
-const PLACEHOLDER_IMAGE = 'https://your-service.com/placeholder.jpg';
+const PLACEHOLDER_IMAGE = 'https://photos.google.com/photo/AF1QipNjHdnDGMJUFI60BlJHwjQT3fk8nqf0nmvqH_1_';
 const CATEGORY_FILE = process.env.CATEGORY_DIRECTORY_FILE || './data/prom_categories.xls';
 const DEFAULT_CATEGORY_ID = process.env.DEFAULT_CATEGORY_ID || '1';
 
@@ -24,7 +24,7 @@ if (!categoryDirStatus.available) {
 
 // Небольшая пауза между СТРОКАМИ (не между ретраями одной строки — та задержка внутри aiClient)
 // нужна, чтобы не упереться в rate limit при последовательной обработке 20 товаров.
-const INTER_ITEM_DELAY_MS = 300;
+const INTER_ITEM_DELAY_MS = 3000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -33,6 +33,11 @@ function sleep(ms) {
 function validateFields(raw) {
   if (!raw.sku) {
     return { valid: false, message: 'Пустой артикул — товар пропущен' };
+  }
+  if (raw.sku.length > 25) {
+    // Лимит Prom.ua на длину артикула (см. "Export Products Sheet", поле Код_товару).
+    // Не обрезаем молча — обрезка может сломать сопоставление с системой поставщика.
+    return { valid: false, message: `Артикул длиннее 25 символов ("${raw.sku}", ${raw.sku.length} симв.) — превышен лимит Prom.ua` };
   }
   if (!raw.name) {
     return { valid: false, message: 'Пустое название товара' };
@@ -53,6 +58,31 @@ function resolveImage(raw) {
     ? `Значение в колонке картинки не похоже на ссылку ("${raw.image}") — подставлена заглушка`
     : 'Ссылка на изображение отсутствует — подставлена заглушка';
   return { resolvedImage: PLACEHOLDER_IMAGE, imageWarning: warning };
+}
+
+/**
+ * Определяет available (true/false) по официальным правилам Prom.ua ("Export Products
+ * Sheet", поле Наявність): "+" — в наличии, "-" — нет, число — дней на доставку (считается
+ * доступным), пусто — товар грузится как "немає в наявності". Мы придерживаемся того же
+ * консервативного дефолта: нет данных о наличии -> available=false, а не молчаливое true.
+ */
+function resolveAvailability(raw) {
+  const value = String(raw.availability ?? '').trim();
+  if (value === '') {
+    return { available: false, warning: 'Наличие товара не указано в файле поставщика — товар помечен как отсутствующий (правило Prom.ua)' };
+  }
+  if (value === '+' || /^!$/.test(value)) {
+    return { available: true, warning: null };
+  }
+  if (value === '-' || value === '0') {
+    return { available: false, warning: null };
+  }
+  const num = Number(value.replace(',', '.'));
+  if (!Number.isNaN(num)) {
+    return { available: num > 0, warning: null };
+  }
+  // Нераспознанное значение — не гадаем, предупреждаем и считаем отсутствующим (тот же консервативный дефолт).
+  return { available: false, warning: `Не удалось распознать значение наличия ("${value}") — товар помечен как отсутствующий` };
 }
 
 /**
@@ -123,6 +153,7 @@ export async function processJob(jobId) {
       }
 
       const { resolvedImage, imageWarning } = resolveImage(raw);
+      const { available, warning: availabilityWarning } = resolveAvailability(raw);
 
       // Шаг 2: генерация контента через ИИ (с retry внутри aiClient).
       try {
@@ -139,15 +170,17 @@ export async function processJob(jobId) {
         // и понижаем статус до warning, а не выбрасываем результат целиком.
         const categoryResult = await resolveCategory(generated, raw);
 
-        const warnings = [imageWarning, categoryResult.warning].filter(Boolean);
+        const warnings = [imageWarning, availabilityWarning, categoryResult.warning].filter(Boolean);
         setItemResult(jobId, i, {
           ...raw,
           status: warnings.length > 0 ? ITEM_STATUS.WARNING : ITEM_STATUS.SUCCESS,
           message: warnings.length > 0 ? warnings.join(' | ') : null,
           resolvedImage,
+          available,
           generatedName: generated.name,
           generatedDescription: generated.description,
           generatedParams: generated.params,
+          vendor: generated.vendor,
           categoryId: categoryResult.categoryId,
           categoryPath: categoryResult.categoryPath,
         });
@@ -157,6 +190,7 @@ export async function processJob(jobId) {
           status: ITEM_STATUS.ERROR,
           message: `Ошибка ИИ: ${aiErr.message}`,
           resolvedImage,
+          available,
         });
       }
 
