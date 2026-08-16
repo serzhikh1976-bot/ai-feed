@@ -1,5 +1,5 @@
 import { getJob, updateJob, setItemResult, JOB_STATUS, ITEM_STATUS } from './jobStore.js';
-import { isValidImageUrl } from './columnMapper.js';
+import { isValidImageUrl, isConfidentImageUrl } from './columnMapper.js';
 import { generateProductContent, selectCategory } from './aiClient.js';
 import { getTopLevelCategories, getBranchCandidates, getCategoryCandidates, getCategoryDirectoryStatus } from './categoryDirectory.js';
 
@@ -49,10 +49,30 @@ function validateFields(raw) {
   return { valid: true };
 }
 
-function resolveImage(raw) {
+function resolveImage(raw, { strictCheck = false } = {}) {
   const hasValidImage = isValidImageUrl(raw.image);
-  if (hasValidImage) {
+  if (hasValidImage && !strictCheck) {
     return { resolvedImage: raw.image, imageWarning: null };
+  }
+  if (hasValidImage && strictCheck) {
+    const confident = isConfidentImageUrl(raw.image);
+    if (confident === true) {
+      return { resolvedImage: raw.image, imageWarning: null };
+    }
+    if (confident === false) {
+      // Похоже не на файл картинки, а на страницу товара (напр. .../product/...) —
+      // колонка была угадана, а не подписана явно поставщиком, доверять нельзя.
+      return {
+        resolvedImage: PLACEHOLDER_IMAGE,
+        imageWarning: `Колонка изображения определена автоматически, а ссылка похожа на страницу товара, а не на файл картинки ("${raw.image}") — подставлена заглушка, стоит проверить вручную`,
+      };
+    }
+    // confident === null: неопределённо (нет расширения, но и не похоже на страницу товара) —
+    // используем ссылку как есть, но предупреждаем, что это не 100% проверено.
+    return {
+      resolvedImage: raw.image,
+      imageWarning: `Колонка изображения определена автоматически — ссылка похожа на файл, но не подтверждена как картинка ("${raw.image}"), стоит проверить вручную`,
+    };
   }
   const warning = raw.image
     ? `Значение в колонке картинки не похоже на ссылку ("${raw.image}") — подставлена заглушка`
@@ -63,12 +83,21 @@ function resolveImage(raw) {
 /**
  * Определяет available (true/false) по официальным правилам Prom.ua ("Export Products
  * Sheet", поле Наявність): "+" — в наличии, "-" — нет, число — дней на доставку (считается
- * доступным), пусто — товар грузится как "немає в наявності". Мы придерживаемся того же
- * консервативного дефолта: нет данных о наличии -> available=false, а не молчаливое true.
+ * доступным), пусто — товар грузится как "немає в наявності".
+ *
+ * Дефолт для ПУСТОГО значения зависит от контекста всего файла (см. wholeColumnEmpty):
+ * - Если по каким-то строкам данные о наличии ЕСТЬ, а у этой конкретной строки пусто —
+ *   уважаем это как явный сигнал поставщика и считаем отсутствующим (консервативный дефолт).
+ * - Если во ВСЁМ файле колонки наличия нет или она пуста целиком — это означает, что
+ *   поставщик просто не ведёт такой учёт, а не что все товары закончились. В этом случае
+ *   по решению заказчика считаем: товар есть в прайсе -> считаем его в наличии.
  */
-function resolveAvailability(raw) {
+function resolveAvailability(raw, { wholeColumnEmpty = false } = {}) {
   const value = String(raw.availability ?? '').trim();
   if (value === '') {
+    if (wholeColumnEmpty) {
+      return { available: true, warning: null };
+    }
     return { available: false, warning: 'Наличие товара не указано в файле поставщика — товар помечен как отсутствующий (правило Prom.ua)' };
   }
   if (value === '+' || /^!$/.test(value)) {
@@ -135,11 +164,17 @@ async function resolveCategory(generated, raw) {
 }
 
 /** Запускает фоновую обработку job'а. Не await'ится вызывающим кодом (fire-and-forget). */
-export async function processJob(jobId) {
+export async function processJob(jobId, { imageColumnGuessed = false } = {}) {
   const job = getJob(jobId);
   if (!job) return;
 
   updateJob(jobId, { status: JOB_STATUS.PROCESSING });
+
+  // Решение принимается один раз на весь файл (не построчно): если данные о наличии
+  // отсутствуют вообще у всех строк — считаем это "поставщик не ведёт учёт", а не
+  // "все товары закончились" (см. resolveAvailability). Если хотя бы у одной строки
+  // есть значение — построчные пустые ячейки по-прежнему трактуются как "нет в наличии".
+  const wholeColumnEmpty = job.items.every((it) => String(it.availability ?? '').trim() === '');
 
   try {
     for (let i = 0; i < job.items.length; i += 1) {
@@ -152,8 +187,8 @@ export async function processJob(jobId) {
         continue;
       }
 
-      const { resolvedImage, imageWarning } = resolveImage(raw);
-      const { available, warning: availabilityWarning } = resolveAvailability(raw);
+      const { resolvedImage, imageWarning } = resolveImage(raw, { strictCheck: imageColumnGuessed });
+      const { available, warning: availabilityWarning } = resolveAvailability(raw, { wholeColumnEmpty });
 
       // Шаг 2: генерация контента через ИИ (с retry внутри aiClient).
       try {

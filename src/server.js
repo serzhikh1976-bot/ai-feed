@@ -44,7 +44,7 @@ fastify.post('/api/upload', async (request, reply) => {
     return reply.code(400).send({ error: `Не удалось прочитать файл: ${err.message}` });
   }
 
-const { mapping, missing } = mapColumns(parsed.headers, parsed.rows);
+const { mapping, guessed, missing } = mapColumns(parsed.headers, parsed.rows);
 if (missing.length > 0) {
   return reply.code(400).send({
     error: `Не найдены обязательные колонки: ${missing.join(', ')}. Проверьте заголовки файла.`,
@@ -59,8 +59,13 @@ if (missing.length > 0) {
 
   const job = createJob({ filename, totalItems: rawItems.length, rawItems });
 
+  // imageColumnGuessed: колонка картинки определена не по явному заголовку поставщика
+  // ("Фото"/"Картинка"), а угадана позиционно/по данным — тогда в processJob применяется
+  // более строгая проверка ссылки (см. columnMapper.isConfidentImageUrl).
+  const imageColumnGuessed = guessed.includes('image');
+
   // Fire-and-forget: не блокируем HTTP-ответ обработкой (см. ТЗ, "Асинхронная обработка").
-  processJob(job.id).catch((err) => fastify.log.error(err));
+  processJob(job.id, { imageColumnGuessed }).catch((err) => fastify.log.error(err));
 
   return reply.code(202).send({
     requestId: job.id,
