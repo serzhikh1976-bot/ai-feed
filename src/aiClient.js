@@ -46,25 +46,30 @@ function parseAndValidate(rawText) {
   if (typeof parsed.description !== 'string' || !parsed.description.trim()) {
     throw new Error('В ответе ИИ отсутствует или пустое поле "description"');
   }
-  if (parsed.description.length > MAX_DESCRIPTION_LENGTH) {
-    // Обрезка "в лоб" может разорвать HTML-тег посередине (например, "<li>Компакт")
-    // и сломать XML/валидатор маркетплейса. Обрезаем по границе последнего целого тега.
-    parsed.description = truncateAtTagBoundary(parsed.description, 500);
+  if (parsed.description.length > 500) {
+    parsed.description = parsed.description.slice(0, 500);
   }
   if (!Array.isArray(parsed.params)) {
     parsed.params = [];
   }
-  if (typeof parsed.categoryTopLevel !== 'string' || !parsed.categoryTopLevel.trim()) {
-    throw new Error('В ответе ИИ отсутствует или пустое поле "categoryTopLevel"');
-  }
-  const vendor = typeof parsed.vendor === 'string' && parsed.vendor.trim() ? parsed.vendor.trim() : 'No Name';
+
+  // Нові поля
+  const seoTitle = parsed.seoTitle && typeof parsed.seoTitle === 'string' ? parsed.seoTitle.trim() : '';
+  const seoDescription = parsed.seoDescription && typeof parsed.seoDescription === 'string' ? parsed.seoDescription.trim() : '';
+  const searchQueries = parsed.searchQueries && typeof parsed.searchQueries === 'string' ? parsed.searchQueries.trim() : '';
+  
+  // ========== ДОДАЄМО ЦЕ ==========
+  const categoryTopLevel = parsed.categoryTopLevel && typeof parsed.categoryTopLevel === 'string' ? parsed.categoryTopLevel.trim() : '';
+  // ================================
 
   return {
     name: parsed.name.trim(),
-    vendor,
     description: parsed.description.trim(),
     params: parsed.params.filter((p) => p && p.name && p.value),
-    categoryTopLevel: parsed.categoryTopLevel.trim(),
+    seoTitle,
+    seoDescription,
+    searchQueries,
+    categoryTopLevel, // <-- додаємо
   };
 }
 
@@ -86,8 +91,8 @@ function getProviderFn(providerName) {
  * Бросает исключение, если все попытки исчерпаны — вызывающий код (processor.js)
  * должен поймать её и пометить товар статусом error (см. ТЗ, раздел 5.1).
  */
-export async function generateProductContent(item, { brand, topLevelCategories, provider, apiKey, model } = {}) {
-  const prompt = buildProductPrompt(item, { brand, topLevelCategories });
+export async function generateProductContent(item, { brand, topLevelCategories, provider, apiKey, model, fileContext = '' } = {}) {
+  const prompt = buildProductPrompt(item, { brand, topLevelCategories, fileContext });
   const callFn = getProviderFn(provider);
 
   let lastError;
@@ -114,11 +119,11 @@ export async function generateProductContent(item, { brand, topLevelCategories, 
  * раздел 3.5: точность важнее экономии, но список короткий, поэтому вызов дешёвый).
  * Та же retry-логика, что и у основного вызова.
  */
-export async function selectCategory(generatedName, generatedDescription, candidates, { provider, apiKey, model } = {}) {
+export async function selectCategory(generatedName, generatedDescription, candidates, { provider, apiKey, model, fileContext = '' } = {}) {
   if (candidates.length === 0) {
     throw new Error('Список кандидатов категорий пуст — нечего выбирать');
   }
-  const prompt = buildCategorySelectionPrompt(generatedName, generatedDescription, candidates);
+  const prompt = buildCategorySelectionPrompt(generatedName, generatedDescription, candidates, fileContext);
   const callFn = getProviderFn(provider);
   const validIds = new Set(candidates.map((c) => c.id));
 

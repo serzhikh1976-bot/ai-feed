@@ -55,16 +55,21 @@ export function buildYmlFeed(job, opts = {}) {
     .map(([id, name]) => `      <category id="${escapeXml(id)}">${escapeXml(name)}</category>`)
     .join('\n');
 
-  const offersXml = includedItems
-    .map((item) => {
-      const categoryId = item.categoryId || defaultCategoryId;
-      const paramsXml = (item.generatedParams || [])
-        .map((p) => `        <param name="${escapeXml(p.name)}">${escapeXml(p.value)}</param>`)
-        .join('\n');
-      const generatedName = item.generatedName || item.name;
-      const generatedDescription = item.generatedDescription || '';
+ const offersXml = includedItems
+  .map((item) => {
+    const categoryId = item.categoryId || defaultCategoryId;
+    const paramsXml = (item.generatedParams || [])
+      .map((p) => `        <param name="${escapeXml(p.name)}">${escapeXml(p.value)}</param>`)
+      .join('\n');
+    const generatedName = item.generatedName || item.name;
+    const generatedDescription = item.generatedDescription || '';
 
-      return `      <offer id="${escapeXml(item.sku)}" available="${item.available ? 'true' : 'false'}" selling_type="r">
+    // SEO-поля
+    const seoTitle = item.seoTitle || generatedName;
+    const seoDescription = item.seoDescription || generatedDescription.replace(/<[^>]*>/g, '').slice(0, 250);
+    const searchQueries = item.searchQueries || '';
+
+    return `      <offer id="${escapeXml(item.sku)}" available="${item.available ? 'true' : 'false'}" selling_type="r">
         <name>${escapeXml(generatedName)}</name>
         <name_ua>${escapeXml(generatedName)}</name_ua>
         <price>${escapeXml(item.price)}</price>
@@ -77,9 +82,12 @@ export function buildYmlFeed(job, opts = {}) {
         <description>${wrapCdata(generatedDescription)}</description>
         <description_ua>${wrapCdata(generatedDescription)}</description_ua>
 ${paramsXml}
+        <html_title>${escapeXml(seoTitle)}</html_title>
+        <html_description>${escapeXml(seoDescription)}</html_description>
+        <search_queries>${escapeXml(searchQueries)}</search_queries>
       </offer>`;
-    })
-    .join('\n');
+  })
+  .join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE yml_catalog SYSTEM "shops.dtd">

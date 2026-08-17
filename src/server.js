@@ -24,7 +24,18 @@ fastify.get('/api/health', async () => ({ ok: true }));
 
 // Этап 1: приём файла, парсинг, маппинг, создание job'а и запуск фоновой обработки.
 fastify.post('/api/upload', async (request, reply) => {
-  const file = await request.file();
+  let file;
+  let context = '';
+
+  // Перебираємо всі частини форми
+  for await (const part of request.parts()) {
+    if (part.fieldname === 'file') {
+      file = part;
+    } else if (part.fieldname === 'context') {
+      context = part.value;
+    }
+  }
+
   if (!file) {
     return reply.code(400).send({ error: 'Файл не передан' });
   }
@@ -44,12 +55,12 @@ fastify.post('/api/upload', async (request, reply) => {
     return reply.code(400).send({ error: `Не удалось прочитать файл: ${err.message}` });
   }
 
-const { mapping, guessed, missing } = mapColumns(parsed.headers, parsed.rows);
-if (missing.length > 0) {
-  return reply.code(400).send({
-    error: `Не найдены обязательные колонки: ${missing.join(', ')}. Проверьте заголовки файла.`,
-  });
-}
+  const { mapping, missing } = mapColumns(parsed.headers, parsed.rows);
+  if (missing.length > 0) {
+    return reply.code(400).send({
+      error: `Не найдены обязательные колонки: ${missing.join(', ')}. Проверьте заголовки файла.`,
+    });
+  }
 
   const rawItems = applyMapping(parsed.rows, mapping);
 
@@ -57,15 +68,14 @@ if (missing.length > 0) {
     return reply.code(400).send({ error: 'В файле нет строк с данными (только заголовок или файл пуст)' });
   }
 
-  const job = createJob({ filename, totalItems: rawItems.length, rawItems });
+  const job = createJob({
+    filename,
+    totalItems: rawItems.length,
+    rawItems,
+    context, // <-- передаємо контекст
+  });
 
-  // imageColumnGuessed: колонка картинки определена не по явному заголовку поставщика
-  // ("Фото"/"Картинка"), а угадана позиционно/по данным — тогда в processJob применяется
-  // более строгая проверка ссылки (см. columnMapper.isConfidentImageUrl).
-  const imageColumnGuessed = guessed.includes('image');
-
-  // Fire-and-forget: не блокируем HTTP-ответ обработкой (см. ТЗ, "Асинхронная обработка").
-  processJob(job.id, { imageColumnGuessed }).catch((err) => fastify.log.error(err));
+  processJob(job.id).catch((err) => fastify.log.error(err));
 
   return reply.code(202).send({
     requestId: job.id,

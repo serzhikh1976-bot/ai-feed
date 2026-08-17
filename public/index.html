@@ -171,6 +171,19 @@
     <button id="clearFile">убрать</button>
   </div>
 
+  <!-- ========== НОВИЙ БЛОК – ПОЛЕ КОНТЕКСТУ ========== -->
+  <div style="margin-top: 16px;">
+    <label for="fileContext" style="display: block; margin-bottom: 6px; font-size: 14px; color: var(--muted);">
+      Контекст файлу (необов'язково):
+    </label>
+    <input type="text" id="fileContext" placeholder="Наприклад: будівельні матеріали"
+           style="width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 14px;">
+    <div style="font-size: 12px; color: var(--muted); margin-top: 4px;">
+      Якщо вказати, цей текст буде передано ШІ як контекст для всіх товарів.
+    </div>
+  </div>
+  <!-- ========== КІНЕЦЬ НОВОГО БЛОКУ ========== -->
+
   <button class="primary" id="uploadBtn" disabled>Загрузить и обработать</button>
 
   <div class="error-box" id="errorBox"></div>
@@ -255,6 +268,15 @@ uploadBtn.addEventListener('click', async () => {
   uploadBtn.textContent = 'Загрузка…';
 
   const formData = new FormData();
+
+  // ========== НОВИЙ КОД – КОНТЕКСТ ==========
+  const contextInput = document.getElementById('fileContext');
+  const fileContext = contextInput.value.trim();
+  if (fileContext) {
+    formData.append('context', fileContext);
+  }
+  // ========== КІНЕЦЬ НОВОГО КОДУ ==========
+
   formData.append('file', selectedFile);
 
   try {

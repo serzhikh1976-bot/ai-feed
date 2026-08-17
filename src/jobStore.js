@@ -21,7 +21,7 @@ export const ITEM_STATUS = {
   ERROR: 'error',
 };
 
-export function createJob({ filename, totalItems, rawItems = [] }) {
+export function createJob({ filename, totalItems, rawItems = [], context = '' }) {
   const id = nanoid(12);
   const job = {
     id,
@@ -29,10 +29,8 @@ export function createJob({ filename, totalItems, rawItems = [] }) {
     filename,
     totalItems,
     processedItems: 0,
-    // Каждый элемент — исходные данные товара + статус обработки.
-    // На этом этапе (без AI) статус проставляется валидацией полей;
-    // на этапе интеграции с AI сюда же добавятся сгенерированные name/description/param.
     items: rawItems.map((raw) => ({ ...raw, status: ITEM_STATUS.PENDING, message: null })),
+    context, // <-- додати
     createdAt: Date.now(),
     updatedAt: Date.now(),
     error: null,
@@ -78,5 +76,6 @@ export function toPublicJob(job) {
     error: job.error,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
+    context: job.context || null,
   };
 }
