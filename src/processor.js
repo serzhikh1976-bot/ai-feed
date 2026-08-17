@@ -1,26 +1,47 @@
-import { getJob, updateJob, setItemResult, JOB_STATUS, ITEM_STATUS } from './jobStore.js';
-import { isValidImageUrl, isConfidentImageUrl } from './columnMapper.js';
-import { generateProductContent, selectCategory } from './aiClient.js';
-import { getTopLevelCategories, getBranchCandidates, getCategoryCandidates, getCategoryDirectoryStatus } from './categoryDirectory.js';
+import {
+  getJob,
+  updateJob,
+  setItemResult,
+  JOB_STATUS,
+  ITEM_STATUS,
+} from "./jobStore.js";
 
-const PLACEHOLDER_IMAGE = 'https://dummyimage.com/300.png/09f/fff';
-const CATEGORY_FILE = process.env.CATEGORY_DIRECTORY_FILE || './data/prom_categories.xls';
-const DEFAULT_CATEGORY_ID = process.env.DEFAULT_CATEGORY_ID || '1';
+import { isValidImageUrl, isConfidentImageUrl, isDirectImageUrl } from './columnMapper.js';
+import { generateProductContent, selectCategory } from "./aiClient.js";
+import {
+  getTopLevelCategories,
+  getBranchCandidates,
+  getCategoryCandidates,
+  getCategoryDirectoryStatus,
+} from "./categoryDirectory.js";
+
+const PLACEHOLDER_IMAGE = "https://dummyimage.com/300.png/09f/fff";
+const CATEGORY_FILE =
+  process.env.CATEGORY_DIRECTORY_FILE || "./data/prom_categories.xls";
+const DEFAULT_CATEGORY_ID = process.env.DEFAULT_CATEGORY_ID || "1";
 
 const AI_CONFIG = {
-  provider: process.env.AI_PROVIDER || 'mock',
-  apiKey: process.env.AI_PROVIDER === 'gemini' ? process.env.GOOGLE_AI_API_KEY : process.env.OPENAI_API_KEY,
+  provider: process.env.AI_PROVIDER || "mock",
+  apiKey:
+    process.env.AI_PROVIDER === "gemini"
+      ? process.env.GOOGLE_AI_API_KEY
+      : process.env.OPENAI_API_KEY,
   model: process.env.AI_MODEL,
   brand: process.env.DEFAULT_BRAND || null,
 };
 
 const categoryDirStatus = getCategoryDirectoryStatus(CATEGORY_FILE);
-const topLevelCategories = categoryDirStatus.available ? getTopLevelCategories(CATEGORY_FILE) : [];
+const topLevelCategories = categoryDirStatus.available
+  ? getTopLevelCategories(CATEGORY_FILE)
+  : [];
 if (!categoryDirStatus.available) {
-  console.warn(`[categories] Справочник не найден по пути "${CATEGORY_FILE}" — используется DEFAULT_CATEGORY_ID="${DEFAULT_CATEGORY_ID}" для всех товаров.`);
+  console.warn(
+    `[categories] Справочник не найден по пути "${CATEGORY_FILE}" — используется DEFAULT_CATEGORY_ID="${DEFAULT_CATEGORY_ID}" для всех товаров.`,
+  );
 }
 
-const INTER_ITEM_DELAY_MS = 3000;
+const INTER_ITEM_DELAY_MS = 10000;
+const INTRA_ITEM_DELAY_MS = 10000; // 1.5 секунди між двома запитами для одного товару
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -28,15 +49,20 @@ function sleep(ms) {
 
 function validateFields(raw) {
   if (!raw.sku) {
-    return { valid: false, message: 'Пустой артикул — товар пропущен' };
+    return { valid: false, message: "Пустой артикул — товар пропущен" };
   }
   if (raw.sku.length > 25) {
-    return { valid: false, message: `Артикул длиннее 25 символов ("${raw.sku}", ${raw.sku.length} симв.) — превышен лимит Prom.ua` };
+    return {
+      valid: false,
+      message: `Артикул длиннее 25 символов ("${raw.sku}", ${raw.sku.length} симв.) — превышен лимит Prom.ua`,
+    };
   }
   if (!raw.name) {
-    return { valid: false, message: 'Пустое название товара' };
+    return { valid: false, message: "Пустое название товара" };
   }
-  const priceNum = Number(String(raw.price).replace(',', '.').replace(/\s/g, ''));
+  const priceNum = Number(
+    String(raw.price).replace(",", ".").replace(/\s/g, ""),
+  );
   if (!raw.price || Number.isNaN(priceNum) || priceNum <= 0) {
     return { valid: false, message: `Некорректная цена: "${raw.price}"` };
   }
@@ -45,6 +71,15 @@ function validateFields(raw) {
 
 function resolveImage(raw, { strictCheck = false } = {}) {
   const hasValidImage = isValidImageUrl(raw.image);
+
+  // Нова перевірка: якщо посилання валідне, але не веде на файл зображення — ставимо заглушку
+  if (hasValidImage && !isDirectImageUrl(raw.image)) {
+    return {
+      resolvedImage: PLACEHOLDER_IMAGE,
+      imageWarning: `Посилання не веде на файл зображення ("${raw.image}") — підставлена заглушка`,
+    };
+  }
+
   if (hasValidImage && !strictCheck) {
     return { resolvedImage: raw.image, imageWarning: null };
   }
@@ -66,39 +101,56 @@ function resolveImage(raw, { strictCheck = false } = {}) {
   }
   const warning = raw.image
     ? `Значение в колонке картинки не похоже на ссылку ("${raw.image}") — подставлена заглушка`
-    : 'Ссылка на изображение отсутствует — подставлена заглушка';
+    : "Ссылка на изображение отсутствует — подставлена заглушка";
   return { resolvedImage: PLACEHOLDER_IMAGE, imageWarning: warning };
 }
 
 function resolveAvailability(raw, { wholeColumnEmpty = false } = {}) {
-  const value = String(raw.availability ?? '').trim();
-  if (value === '') {
+  const value = String(raw.availability ?? "").trim();
+  if (value === "") {
     if (wholeColumnEmpty) {
       return { available: true, warning: null };
     }
-    return { available: false, warning: 'Наличие товара не указано в файле поставщика — товар помечен как отсутствующий (правило Prom.ua)' };
+    return {
+      available: false,
+      warning:
+        "Наличие товара не указано в файле поставщика — товар помечен как отсутствующий (правило Prom.ua)",
+    };
   }
-  if (value === '+' || /^!$/.test(value)) {
+  if (value === "+" || /^!$/.test(value)) {
     return { available: true, warning: null };
   }
-  if (value === '-' || value === '0') {
+  if (value === "-" || value === "0") {
     return { available: false, warning: null };
   }
-  const num = Number(value.replace(',', '.'));
+  const num = Number(value.replace(",", "."));
   if (!Number.isNaN(num)) {
     return { available: num > 0, warning: null };
   }
-  return { available: false, warning: `Не удалось распознать значение наличия ("${value}") — товар помечен как отсутствующий` };
+  return {
+    available: false,
+    warning: `Не удалось распознать значение наличия ("${value}") — товар помечен как отсутствующий`,
+  };
 }
 
 // ==================== ОСНОВНА ЗМІНА ТУТ ====================
-async function resolveCategory(generated, raw, fileContext = '') {
+async function resolveCategory(generated, raw, fileContext = "") {
   if (!categoryDirStatus.available) {
-    return { categoryId: DEFAULT_CATEGORY_ID, categoryPath: null, warning: 'Справочник категорий не подключён — использована категория по умолчанию' };
+    return {
+      categoryId: DEFAULT_CATEGORY_ID,
+      categoryPath: null,
+      warning:
+        "Справочник категорий не подключён — использована категория по умолчанию",
+    };
   }
 
   const productText = `${generated.name} ${generated.description}`;
-  let candidates = getBranchCandidates(productText, CATEGORY_FILE, generated.categoryTopLevel, 12);
+  let candidates = getBranchCandidates(
+    productText,
+    CATEGORY_FILE,
+    generated.categoryTopLevel,
+    12,
+  );
 
   let warningPrefix = null;
   if (candidates.length === 0) {
@@ -107,7 +159,12 @@ async function resolveCategory(generated, raw, fileContext = '') {
   }
 
   if (candidates.length === 0) {
-    return { categoryId: DEFAULT_CATEGORY_ID, categoryPath: null, warning: 'Не найдено ни одного кандидата категории — использована категория по умолчанию' };
+    return {
+      categoryId: DEFAULT_CATEGORY_ID,
+      categoryPath: null,
+      warning:
+        "Не найдено ни одного кандидата категории — использована категория по умолчанию",
+    };
   }
 
   try {
@@ -120,10 +177,14 @@ async function resolveCategory(generated, raw, fileContext = '') {
         apiKey: AI_CONFIG.apiKey,
         model: AI_CONFIG.model,
         fileContext: fileContext, // <-- ПЕРЕДАЄМО КОНТЕКСТ
-      }
+      },
     );
     const chosen = candidates.find((c) => c.id === categoryId);
-    return { categoryId, categoryPath: chosen?.path ?? null, warning: warningPrefix };
+    return {
+      categoryId,
+      categoryPath: chosen?.path ?? null,
+      warning: warningPrefix,
+    };
   } catch (err) {
     const fallback = candidates[0];
     return {
@@ -138,11 +199,13 @@ async function resolveCategory(generated, raw, fileContext = '') {
 export async function processJob(jobId, { imageColumnGuessed = false } = {}) {
   const job = getJob(jobId);
   if (!job) return;
-  const { context = '' } = job;
+  const { context = "" } = job;
 
   updateJob(jobId, { status: JOB_STATUS.PROCESSING });
 
-  const wholeColumnEmpty = job.items.every((it) => String(it.availability ?? '').trim() === '');
+  const wholeColumnEmpty = job.items.every(
+    (it) => String(it.availability ?? "").trim() === "",
+  );
 
   try {
     for (let i = 0; i < job.items.length; i += 1) {
@@ -150,12 +213,21 @@ export async function processJob(jobId, { imageColumnGuessed = false } = {}) {
 
       const fieldCheck = validateFields(raw);
       if (!fieldCheck.valid) {
-        setItemResult(jobId, i, { ...raw, status: ITEM_STATUS.ERROR, message: fieldCheck.message });
+        setItemResult(jobId, i, {
+          ...raw,
+          status: ITEM_STATUS.ERROR,
+          message: fieldCheck.message,
+        });
         continue;
       }
 
-      const { resolvedImage, imageWarning } = resolveImage(raw, { strictCheck: imageColumnGuessed });
-      const { available, warning: availabilityWarning } = resolveAvailability(raw, { wholeColumnEmpty });
+      const { resolvedImage, imageWarning } = resolveImage(raw, {
+        strictCheck: imageColumnGuessed,
+      });
+      const { available, warning: availabilityWarning } = resolveAvailability(
+        raw,
+        { wholeColumnEmpty },
+      );
 
       try {
         const generated = await generateProductContent(raw, {
@@ -166,14 +238,19 @@ export async function processJob(jobId, { imageColumnGuessed = false } = {}) {
           model: AI_CONFIG.model,
           fileContext: context,
         });
-
+        await sleep(INTRA_ITEM_DELAY_MS);
         const categoryResult = await resolveCategory(generated, raw, context);
 
-        const warnings = [imageWarning, availabilityWarning, categoryResult.warning].filter(Boolean);
+        const warnings = [
+          imageWarning,
+          availabilityWarning,
+          categoryResult.warning,
+        ].filter(Boolean);
         setItemResult(jobId, i, {
           ...raw,
-          status: warnings.length > 0 ? ITEM_STATUS.WARNING : ITEM_STATUS.SUCCESS,
-          message: warnings.length > 0 ? warnings.join(' | ') : null,
+          status:
+            warnings.length > 0 ? ITEM_STATUS.WARNING : ITEM_STATUS.SUCCESS,
+          message: warnings.length > 0 ? warnings.join(" | ") : null,
           resolvedImage,
           available,
           generatedName: generated.name,
@@ -182,9 +259,9 @@ export async function processJob(jobId, { imageColumnGuessed = false } = {}) {
           vendor: generated.vendor,
           categoryId: categoryResult.categoryId,
           categoryPath: categoryResult.categoryPath,
-          seoTitle: generated.seoTitle || '',
-          seoDescription: generated.seoDescription || '',
-          searchQueries: generated.searchQueries || '',
+          seoTitle: generated.seoTitle || "",
+          seoDescription: generated.seoDescription || "",
+          searchQueries: generated.searchQueries || "",
         });
       } catch (aiErr) {
         setItemResult(jobId, i, {

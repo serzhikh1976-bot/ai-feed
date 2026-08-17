@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { FIELD_KEYWORDS } from './columnMapper.js';
 
-const MAX_ROWS = 20;
+const MAX_ROWS = 10;
 
 function findHeaderRow(matrix) {
   const skuWords = (FIELD_KEYWORDS.sku || []).map(w => w.toLowerCase());

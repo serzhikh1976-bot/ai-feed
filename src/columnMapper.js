@@ -253,3 +253,12 @@ export function isConfidentImageUrl(value) {
   // считаем подтверждённым; вызывающий код должен трактовать это как неопределённость.
   return null;
 }
+
+/**
+ * Перевіряє, чи URL веде безпосередньо на файл зображення (за розширенням).
+ * Повертає true, якщо URL закінчується на .jpg, .jpeg, .png, .gif, .webp, .svg
+ */
+export function isDirectImageUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  return /\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i.test(url.trim());
+}

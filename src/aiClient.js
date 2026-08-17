@@ -2,7 +2,8 @@ import { buildProductPrompt, buildCategorySelectionPrompt } from './promptBuilde
 import { callOpenAI, callGemini } from './aiProviders.js';
 import { callMock } from './mockProvider.js';
 
-const RETRY_DELAYS_MS = [2000, 5000]; // см. ТЗ 5.1: до 2 повторов, экспоненциальный рост
+const RETRY_DELAYS_MS = [3000, 7000]; // см. ТЗ 5.1: до 2 повторов, экспоненциальный рост
+
 
 // Официальный лимит Prom.ua на описание — 12160 символов (см. "Export Products Sheet",
 // поле Опис_укр). Это safety-cap от неадекватно длинного ответа ИИ, а не целевая длина —
