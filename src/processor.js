@@ -41,7 +41,7 @@ if (!categoryDirStatus.available) {
 }
 
 const INTER_ITEM_DELAY_MS = 10000;
-const INTRA_ITEM_DELAY_MS = 10000; // 1.5 секунди між двома запитами для одного товару
+const INTRA_ITEM_DELAY_MS = 10000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -71,15 +71,12 @@ function validateFields(raw) {
 
 function resolveImage(raw, { strictCheck = false } = {}) {
   const hasValidImage = isValidImageUrl(raw.image);
-
-  // Нова перевірка: якщо посилання валідне, але не веде на файл зображення — ставимо заглушку
   if (hasValidImage && !isDirectImageUrl(raw.image)) {
     return {
       resolvedImage: PLACEHOLDER_IMAGE,
       imageWarning: `Посилання не веде на файл зображення ("${raw.image}") — підставлена заглушка`,
     };
   }
-
   if (hasValidImage && !strictCheck) {
     return { resolvedImage: raw.image, imageWarning: null };
   }
@@ -133,7 +130,6 @@ function resolveAvailability(raw, { wholeColumnEmpty = false } = {}) {
   };
 }
 
-// ==================== ОСНОВНА ЗМІНА ТУТ ====================
 async function resolveCategory(generated, raw, fileContext = "") {
   if (!categoryDirStatus.available) {
     return {
@@ -176,7 +172,7 @@ async function resolveCategory(generated, raw, fileContext = "") {
         provider: AI_CONFIG.provider,
         apiKey: AI_CONFIG.apiKey,
         model: AI_CONFIG.model,
-        fileContext: fileContext, // <-- ПЕРЕДАЄМО КОНТЕКСТ
+        fileContext: fileContext,
       },
     );
     const chosen = candidates.find((c) => c.id === categoryId);
@@ -194,12 +190,11 @@ async function resolveCategory(generated, raw, fileContext = "") {
     };
   }
 }
-// ===========================================================
 
 export async function processJob(jobId, { imageColumnGuessed = false } = {}) {
   const job = getJob(jobId);
   if (!job) return;
-  const { context = "" } = job;
+  const { context = '', brand: globalBrand = '', productType = '', descriptionRequirements = '' } = job;
 
   updateJob(jobId, { status: JOB_STATUS.PROCESSING });
 
@@ -231,15 +226,23 @@ export async function processJob(jobId, { imageColumnGuessed = false } = {}) {
 
       try {
         const generated = await generateProductContent(raw, {
-          brand: AI_CONFIG.brand,
+          brand: globalBrand,
           topLevelCategories,
           provider: AI_CONFIG.provider,
           apiKey: AI_CONFIG.apiKey,
           model: AI_CONFIG.model,
           fileContext: context,
+          productType,
+          descriptionRequirements,
         });
         await sleep(INTRA_ITEM_DELAY_MS);
         const categoryResult = await resolveCategory(generated, raw, context);
+
+        // Принудительная подстановка бренда, если задан пользователем
+        let vendorValue = generated.vendor;
+        if (globalBrand && (!vendorValue || vendorValue === 'No Name')) {
+          vendorValue = globalBrand;
+        }
 
         const warnings = [
           imageWarning,
@@ -256,7 +259,7 @@ export async function processJob(jobId, { imageColumnGuessed = false } = {}) {
           generatedName: generated.name,
           generatedDescription: generated.description,
           generatedParams: generated.params,
-          vendor: generated.vendor,
+          vendor: vendorValue,
           categoryId: categoryResult.categoryId,
           categoryPath: categoryResult.categoryPath,
           seoTitle: generated.seoTitle || "",

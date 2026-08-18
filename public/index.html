@@ -182,7 +182,30 @@
       Якщо вказати, цей текст буде передано ШІ як контекст для всіх товарів.
     </div>
   </div>
-  <!-- ========== КІНЕЦЬ НОВОГО БЛОКУ ========== -->
+
+  <div style="margin-top: 12px;">
+    <label for="fileBrand" style="display: block; margin-bottom: 4px; font-size: 14px; color: var(--muted);">Бренд (якщо всі товари одного бренду)</label>
+    <input type="text" id="fileBrand" placeholder="Наприклад: VOX" style="width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 14px;">
+    <div style="font-size: 12px; color: var(--muted); margin-top: 4px;">
+      Якщо вказано – ШІ використовуватиме цей бренд жорстко для всіх товарів.
+    </div>
+  </div>
+
+  <div style="margin-top: 12px;">
+    <label for="fileProductType" style="display: block; margin-bottom: 4px; font-size: 14px; color: var(--muted);">Тип товару (уточнює категорію)</label>
+    <input type="text" id="fileProductType" placeholder="Наприклад: Софіти та комплектуючі для покрівлі" style="width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 14px;">
+    <div style="font-size: 12px; color: var(--muted); margin-top: 4px;">
+      ШІ врахує цю інформацію при виборі категорії та типових характеристик.
+    </div>
+  </div>
+
+  <div style="margin-top: 12px;">
+    <label for="fileDescriptionRequirements" style="display: block; margin-bottom: 4px; font-size: 14px; color: var(--muted);">Особливі вимоги до опису</label>
+    <input type="text" id="fileDescriptionRequirements" placeholder="Наприклад: Додай інформацію про вентиляцію та довговічність" style="width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 14px;">
+    <div style="font-size: 12px; color: var(--muted); margin-top: 4px;">
+      ШІ включить ці вимоги в опис кожного товару.
+    </div>
+  </div>
 
   <button class="primary" id="uploadBtn" disabled>Загрузить и обработать</button>
 
@@ -268,16 +291,23 @@ uploadBtn.addEventListener('click', async () => {
   uploadBtn.textContent = 'Загрузка…';
 
   const formData = new FormData();
+  formData.append('file', selectedFile);
 
-  // ========== НОВИЙ КОД – КОНТЕКСТ ==========
   const contextInput = document.getElementById('fileContext');
   const fileContext = contextInput.value.trim();
-  if (fileContext) {
-    formData.append('context', fileContext);
-  }
-  // ========== КІНЕЦЬ НОВОГО КОДУ ==========
+  if (fileContext) formData.append('context', fileContext);
 
-  formData.append('file', selectedFile);
+  const brandInput = document.getElementById('fileBrand');
+  const brand = brandInput.value.trim();
+  if (brand) formData.append('brand', brand);
+
+  const productTypeInput = document.getElementById('fileProductType');
+  const productType = productTypeInput.value.trim();
+  if (productType) formData.append('productType', productType);
+
+  const descReqInput = document.getElementById('fileDescriptionRequirements');
+  const descriptionRequirements = descReqInput.value.trim();
+  if (descriptionRequirements) formData.append('descriptionRequirements', descriptionRequirements);
 
   try {
     const resp = await fetch('/api/upload', { method: 'POST', body: formData });
@@ -323,7 +353,7 @@ async function poll(requestId, totalItems) {
       downloadBtn.disabled = false;
     }
   } catch (err) {
-    // сеть моргнула — просто ждём следующего тика polling
+    // network error – wait for next poll
   }
 }
 

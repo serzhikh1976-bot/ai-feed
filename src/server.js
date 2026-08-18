@@ -11,7 +11,7 @@ import { processJob } from './processor.js';
 import { buildYmlFeed, countFeedItems } from './xmlBuilder.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 МБ — см. ТЗ, валидация загрузки
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 const fastify = Fastify({ logger: true });
 await fastify.register(multipart, { limits: { fileSize: MAX_FILE_SIZE } });
@@ -22,17 +22,15 @@ await fastify.register(staticPlugin, {
 
 fastify.get('/api/health', async () => ({ ok: true }));
 
-// Этап 1: приём файла, парсинг, маппинг, создание job'а и запуск фоновой обработки.
 fastify.post('/api/upload', async (request, reply) => {
   let file;
-  let context = '';
+  const fields = {};
 
-  // Перебираємо всі частини форми
   for await (const part of request.parts()) {
     if (part.fieldname === 'file') {
       file = part;
-    } else if (part.fieldname === 'context') {
-      context = part.value;
+    } else {
+      fields[part.fieldname] = part.value;
     }
   }
 
@@ -72,7 +70,10 @@ fastify.post('/api/upload', async (request, reply) => {
     filename,
     totalItems: rawItems.length,
     rawItems,
-    context, // <-- передаємо контекст
+    context: fields.context || '',
+    brand: fields.brand || '',
+    productType: fields.productType || '',
+    descriptionRequirements: fields.descriptionRequirements || '',
   });
 
   processJob(job.id).catch((err) => fastify.log.error(err));
@@ -85,7 +86,6 @@ fastify.post('/api/upload', async (request, reply) => {
   });
 });
 
-// Опрос статуса job'а — фронтенд будет дёргать это раз в 2-3 сек (polling).
 fastify.get('/api/jobs/:id', async (request, reply) => {
   const job = getJob(request.params.id);
   if (!job) {
@@ -94,7 +94,6 @@ fastify.get('/api/jobs/:id', async (request, reply) => {
   return toPublicJob(job);
 });
 
-// Скачивание готового XML-фида — доступно только для завершённых job'ов.
 fastify.get('/api/jobs/:id/download', async (request, reply) => {
   const job = getJob(request.params.id);
   if (!job) {

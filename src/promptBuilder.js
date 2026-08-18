@@ -1,22 +1,22 @@
-// Промпт строится строго по ТЗ (раздел 3.2–3.4):
-// - обязательная локализация на украинский, независимо от языка исходника;
-// - формула SEO-названия: [Тип товара] + [Бренд] + [Модель/Артикул] + [Ключевые свойства];
-// - бренд: если передан пользователем — использовать жёстко, иначе искать в тексте, иначе "No Name";
-// - описание — лаконичное продающее, с HTML-тегами <p>/<ul>/<li>;
-// - параметры — массив пар { name, value } (материал, цвет, размер, страна и т.п.).
-
-export function buildProductPrompt(item, { brand, topLevelCategories = [], categoryName = '', fileContext = '' } = {}) {
+export function buildProductPrompt(item, { brand, topLevelCategories = [], fileContext = '', productType = '', descriptionRequirements = '' } = {}) {
   const brandInstruction = brand
     ? `Бренд ЖЁСТКО задан пользователем: "${brand}". Используй именно это значение, не ищи бренд в тексте.`
     : `Бренд не задан пользователем. Найди бренд в названии/описании товара. Если бренд определить невозможно — используй "No Name".`;
 
   const categoryList = topLevelCategories.map((c) => `- ${c}`).join('\n');
   
-  const categoryContext = categoryName
-    ? `Категорія товару (визначена автоматично): "${categoryName}". Враховуй це при формуванні технічного опису — додавай типові для цієї категорії характеристики, навіть якщо вони не вказані явно у вхідних даних.`
-    : 'Категорія товару не визначена. Орієнтуйся на назву та опис.';
-    const contextInstruction = fileContext
+  const categoryContext = 'Категорія товару не визначена. Орієнтуйся на назву та опис.';
+
+  const contextInstruction = fileContext
     ? `Додатковий контекст файлу: "${fileContext}". Урахуй цей контекст при формуванні назви, опису, параметрів і виборі верхньорівневої категорії.`
+    : '';
+
+  const productTypeInstruction = productType
+    ? `Тип товару (вказано користувачем): "${productType}". Використовуй це для уточнення категорії та для додавання типових характеристик, що відповідають цьому типу товару (наприклад, для софітів — вентиляція, перфорація, стійкість до УФ).`
+    : '';
+
+  const descReqInstruction = descriptionRequirements
+    ? `Особливі вимоги до опису (вказано користувачем): "${descriptionRequirements}". Обов'язково врахуй це при формуванні опису та переліку переваг.`
     : '';
 
   const system = `Ты — ИИ-ассистент интернет-магазина, который готовит карточки товаров для украинских маркетплейсов Prom.ua и Rozetka.
@@ -31,6 +31,8 @@ export function buildProductPrompt(item, { brand, topLevelCategories = [], categ
 
 ${brandInstruction}
 ${contextInstruction}
+${productTypeInstruction}
+${descReqInstruction}
 ${categoryContext}
 
 Список верхнеуровневых категорий маркетплейса (используй СТРОГО одно значение из этого списка дословно, не изобретай новое и не изменяй формулировку):
@@ -62,15 +64,9 @@ ${categoryList}
 
   return { system, user };
 }
-/**
- * Второй, узкий промпт — только выбор categoryId из короткого списка кандидатов
- * (уже отфильтрованных по top-level ветке, см. categoryDirectory.getBranchCandidates).
- * Отдельный от основного промпта вызов — дороже на одно обращение к API, но сам список
- * короткий (10-15 категорий), так что расход токенов на этот шаг небольшой.
- */
+
 export function buildCategorySelectionPrompt(generatedName, generatedDescription, candidates, fileContext = '') {
   const list = candidates.map((c) => `- id="${c.id}": ${c.path.join(' > ')}`).join('\n');
-
   const contextPart = fileContext 
     ? `Загальний контекст файлу: "${fileContext}". Враховуй це при виборі категорії — віддавай перевагу категоріям, що відповідають цьому контексту.` 
     : '';

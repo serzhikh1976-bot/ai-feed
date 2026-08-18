@@ -1,10 +1,5 @@
 import { nanoid } from 'nanoid';
 
-// MVP: job'ы храним в памяти процесса. Согласно ТЗ (раздел "Асинхронная обработка"),
-// на реальных объёмах это стоит перенести в БД (та же, где считается email-лимит),
-// но для каркаса и локального тестирования in-memory Map полностью достаточен.
-// Известное ограничение: перезапуск процесса = все job'ы теряются (см. ТЗ, известные ограничения MVP).
-
 const jobs = new Map();
 
 export const JOB_STATUS = {
@@ -21,7 +16,7 @@ export const ITEM_STATUS = {
   ERROR: 'error',
 };
 
-export function createJob({ filename, totalItems, rawItems = [], context = '' }) {
+export function createJob({ filename, totalItems, rawItems = [], context = '', brand = '', productType = '', descriptionRequirements = '' }) {
   const id = nanoid(12);
   const job = {
     id,
@@ -30,7 +25,10 @@ export function createJob({ filename, totalItems, rawItems = [], context = '' })
     totalItems,
     processedItems: 0,
     items: rawItems.map((raw) => ({ ...raw, status: ITEM_STATUS.PENDING, message: null })),
-    context, // <-- додати
+    context,
+    brand,
+    productType,
+    descriptionRequirements,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     error: null,
@@ -59,7 +57,6 @@ export function setItemResult(id, index, result) {
   return job;
 }
 
-/** Публичное представление job'а для API-ответа (без внутренних деталей). */
 export function toPublicJob(job) {
   if (!job) return null;
   const successCount = job.items.filter((i) => i?.status === ITEM_STATUS.SUCCESS).length;
@@ -77,5 +74,8 @@ export function toPublicJob(job) {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     context: job.context || null,
+    brand: job.brand || null,
+    productType: job.productType || null,
+    descriptionRequirements: job.descriptionRequirements || null,
   };
 }

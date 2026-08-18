@@ -2,34 +2,14 @@ import { buildProductPrompt, buildCategorySelectionPrompt } from './promptBuilde
 import { callOpenAI, callGemini } from './aiProviders.js';
 import { callMock } from './mockProvider.js';
 
-const RETRY_DELAYS_MS = [3000, 7000]; // см. ТЗ 5.1: до 2 повторов, экспоненциальный рост
-
-
-// Официальный лимит Prom.ua на описание — 12160 символов (см. "Export Products Sheet",
-// поле Опис_укр). Это safety-cap от неадекватно длинного ответа ИИ, а не целевая длина —
-// промпт по-прежнему просит лаконичный текст, но раньше здесь стоял искусственный лимит
-// в 500 символов из черновика ТЗ, который был в 24 раза жёстче официального.
-const MAX_DESCRIPTION_LENGTH = 2000;
+const RETRY_DELAYS_MS = [3000, 7000];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function stripCodeFences(text) {
-  // На случай если модель всё же обернула JSON в ```json ... ``` вопреки инструкции.
   return text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-}
-
-/** Обрезает HTML-строку до limit символов, не разрывая тег посередине — откатывается до последнего "}" открытого тега или пробела. */
-function truncateAtTagBoundary(html, limit) {
-  let cut = html.slice(0, limit);
-  // Если разрез попал внутрь тега (после последнего "<" нет ">"), откатываемся до этого "<".
-  const lastOpen = cut.lastIndexOf('<');
-  const lastClose = cut.lastIndexOf('>');
-  if (lastOpen > lastClose) {
-    cut = cut.slice(0, lastOpen);
-  }
-  return cut;
 }
 
 function parseAndValidate(rawText) {
@@ -47,21 +27,18 @@ function parseAndValidate(rawText) {
   if (typeof parsed.description !== 'string' || !parsed.description.trim()) {
     throw new Error('В ответе ИИ отсутствует или пустое поле "description"');
   }
-  if (parsed.description.length > 500) {
-    parsed.description = parsed.description.slice(0, 500);
+  if (parsed.description.length > 2000) {
+    parsed.description = parsed.description.slice(0, 2000);
   }
   if (!Array.isArray(parsed.params)) {
     parsed.params = [];
   }
 
-  // Нові поля
   const seoTitle = parsed.seoTitle && typeof parsed.seoTitle === 'string' ? parsed.seoTitle.trim() : '';
   const seoDescription = parsed.seoDescription && typeof parsed.seoDescription === 'string' ? parsed.seoDescription.trim() : '';
   const searchQueries = parsed.searchQueries && typeof parsed.searchQueries === 'string' ? parsed.searchQueries.trim() : '';
-  
-  // ========== ДОДАЄМО ЦЕ ==========
   const categoryTopLevel = parsed.categoryTopLevel && typeof parsed.categoryTopLevel === 'string' ? parsed.categoryTopLevel.trim() : '';
-  // ================================
+  const vendor = parsed.vendor && typeof parsed.vendor === 'string' ? parsed.vendor.trim() : 'No Name';
 
   return {
     name: parsed.name.trim(),
@@ -70,7 +47,8 @@ function parseAndValidate(rawText) {
     seoTitle,
     seoDescription,
     searchQueries,
-    categoryTopLevel, // <-- додаємо
+    categoryTopLevel,
+    vendor,
   };
 }
 
@@ -87,13 +65,23 @@ function getProviderFn(providerName) {
   }
 }
 
-/**
- * Генерирует name/description/params/categoryTopLevel для товара через AI с retry-логикой.
- * Бросает исключение, если все попытки исчерпаны — вызывающий код (processor.js)
- * должен поймать её и пометить товар статусом error (см. ТЗ, раздел 5.1).
- */
-export async function generateProductContent(item, { brand, topLevelCategories, provider, apiKey, model, fileContext = '' } = {}) {
-  const prompt = buildProductPrompt(item, { brand, topLevelCategories, fileContext });
+export async function generateProductContent(item, {
+  brand,
+  topLevelCategories,
+  provider,
+  apiKey,
+  model,
+  fileContext = '',
+  productType = '',
+  descriptionRequirements = '',
+} = {}) {
+  const prompt = buildProductPrompt(item, {
+    brand,
+    topLevelCategories,
+    fileContext,
+    productType,
+    descriptionRequirements,
+  });
   const callFn = getProviderFn(provider);
 
   let lastError;
@@ -115,11 +103,6 @@ export async function generateProductContent(item, { brand, topLevelCategories, 
   throw new Error(`Не удалось получить корректный ответ от ИИ после ${maxAttempts} попыток. Последняя ошибка: ${lastError.message}`);
 }
 
-/**
- * Второй, узкий вызов — выбор categoryId из короткого списка кандидатов (см. ТЗ,
- * раздел 3.5: точность важнее экономии, но список короткий, поэтому вызов дешёвый).
- * Та же retry-логика, что и у основного вызова.
- */
 export async function selectCategory(generatedName, generatedDescription, candidates, { provider, apiKey, model, fileContext = '' } = {}) {
   if (candidates.length === 0) {
     throw new Error('Список кандидатов категорий пуст — нечего выбирать');

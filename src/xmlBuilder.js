@@ -1,7 +1,3 @@
-// Сборка XML в формате YML (совместим с Prom.ua/Rozetka) — см. ТЗ, раздел 4.
-// В фид попадают ТОЛЬКО товары со статусом success/warning; error-товары исключаются
-// (см. ТЗ, критерии приёмки — итоговый XML не должен содержать битых offer-тегов).
-
 function escapeXml(text) {
   return String(text ?? '')
     .replace(/&/g, '&amp;')
@@ -12,7 +8,6 @@ function escapeXml(text) {
 }
 
 function wrapCdata(html) {
-  // На случай если сгенерированный текст случайно содержит "]]>" — это разорвало бы CDATA-блок.
   const safe = String(html ?? '').replace(/]]>/g, ']]]]><![CDATA[>');
   return `<![CDATA[${safe}]]>`;
 }
@@ -27,19 +22,13 @@ function formatDate(date) {
   return `${y}-${m}-${d} ${hh}:${mm}`;
 }
 
-/**
- * Собирает YML-фид из job'а. Включает только success/warning товары.
- * @param {object} job - публичное представление job'а (см. jobStore.toPublicJob)
- * @param {object} opts - { shopName, defaultCategoryId }
- */
 export function buildYmlFeed(job, opts = {}) {
   const shopName = opts.shopName || 'AI Feed Shop';
   const defaultCategoryId = opts.defaultCategoryId || '1';
 
   const includedItems = job.items.filter((it) => it && (it.status === 'success' || it.status === 'warning'));
 
-  // Уникальные категории среди включённых товаров — для блока <categories>.
-  const categoryMap = new Map(); // id -> название (последний уровень пути)
+  const categoryMap = new Map();
   for (const item of includedItems) {
     const id = item.categoryId || defaultCategoryId;
     const name = item.categoryPath && item.categoryPath.length > 0
@@ -55,21 +44,19 @@ export function buildYmlFeed(job, opts = {}) {
     .map(([id, name]) => `      <category id="${escapeXml(id)}">${escapeXml(name)}</category>`)
     .join('\n');
 
- const offersXml = includedItems
-  .map((item) => {
-    const categoryId = item.categoryId || defaultCategoryId;
-    const paramsXml = (item.generatedParams || [])
-      .map((p) => `        <param name="${escapeXml(p.name)}">${escapeXml(p.value)}</param>`)
-      .join('\n');
-    const generatedName = item.generatedName || item.name;
-    const generatedDescription = item.generatedDescription || '';
+  const offersXml = includedItems
+    .map((item) => {
+      const categoryId = item.categoryId || defaultCategoryId;
+      const paramsXml = (item.generatedParams || [])
+        .map((p) => `        <param name="${escapeXml(p.name)}">${escapeXml(p.value)}</param>`)
+        .join('\n');
+      const generatedName = item.generatedName || item.name;
+      const generatedDescription = item.generatedDescription || '';
+      const seoTitle = item.seoTitle || generatedName;
+      const seoDescription = item.seoDescription || generatedDescription.replace(/<[^>]*>/g, '').slice(0, 250);
+      const searchQueries = item.searchQueries || '';
 
-    // SEO-поля
-    const seoTitle = item.seoTitle || generatedName;
-    const seoDescription = item.seoDescription || generatedDescription.replace(/<[^>]*>/g, '').slice(0, 250);
-    const searchQueries = item.searchQueries || '';
-
-    return `      <offer id="${escapeXml(item.sku)}" available="${item.available ? 'true' : 'false'}" selling_type="r">
+      return `      <offer id="${escapeXml(item.sku)}" available="${item.available ? 'true' : 'false'}" selling_type="r">
         <name>${escapeXml(generatedName)}</name>
         <name_ua>${escapeXml(generatedName)}</name_ua>
         <price>${escapeXml(item.price)}</price>
@@ -86,8 +73,8 @@ ${paramsXml}
         <html_description>${escapeXml(seoDescription)}</html_description>
         <search_queries>${escapeXml(searchQueries)}</search_queries>
       </offer>`;
-  })
-  .join('\n');
+    })
+    .join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE yml_catalog SYSTEM "shops.dtd">
@@ -108,7 +95,6 @@ ${offersXml}
 `;
 }
 
-/** Сколько товаров реально попадёт в фид (success+warning) — для UI/проверок перед скачиванием. */
 export function countFeedItems(job) {
   return job.items.filter((it) => it && (it.status === 'success' || it.status === 'warning')).length;
 }
