@@ -42,6 +42,7 @@ function normalize(text) {
 const SYNONYM_GROUPS = [
   ['павербанк', 'повербанк', 'пауербанк'],
   ['зарядка', 'зарядне', 'зарядний', 'зарядного', 'зарядные'],
+  ['худі', 'худи', 'світшот', 'свитшот', 'толстовка', 'светр', 'кофта', 'кардиган'],
 ];
 
 // Небольшой стеммер для сравнения по корню слова, а не по фиксированной длине префикса.
@@ -176,7 +177,14 @@ export function getBranchCandidates(productText, filePath, topLevel, limit = 12)
   // Если вообще ничего не совпало по ключевым словам — не отдаём пустой список,
   // отдаём хотя бы общие категории ветки, чтобы ИИ было из чего выбрать.
   if (topCandidates.length === 0) {
-    return branchCategories.filter((c) => /загальне/i.test(c.leafName)).slice(0, 5);
+    const generic = branchCategories.filter((c) => /загальне/i.test(c.leafName));
+    const groups = {};
+    for (const c of generic) {
+      const sub = c.path[1] || 'default';
+      if (!groups[sub]) groups[sub] = [];
+      if (groups[sub].length < 2) groups[sub].push(c);
+    }
+    return Object.values(groups).flat().slice(0, 12);
   }
   return topCandidates;
 }

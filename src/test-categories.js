@@ -1,6 +1,8 @@
 import { getCategoryCandidates, getCategoryDirectoryStatus } from './categoryDirectory.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const FILE = '/home/claude/ai-feed-generator/data/prom_categories.xls';
+const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/prom_categories.xls');
 
 const status = getCategoryDirectoryStatus(FILE);
 console.log('Справочник:', status);
