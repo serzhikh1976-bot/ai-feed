@@ -15,19 +15,15 @@ function findHeaderRow(matrix) {
     const cells = row.map(cell => String(cell ?? '').toLowerCase().trim());
     if (cells.every(c => c === '')) continue;
 
-    console.log(`[parser] Проверка строки ${i}:`, cells.slice(0, 6));
-
     const hasSku = cells.some(cell => skuWords.some(word => cell.includes(word)));
     const hasName = cells.some(cell => nameWords.some(word => cell.includes(word)));
     const hasPrice = cells.some(cell => priceWords.some(word => cell.includes(word)));
 
     if (hasSku && hasName && hasPrice) {
-      console.log(`[parser] ✅ Найден заголовок на строке ${i}:`, cells.slice(0, 6));
       return i;
     }
   }
 
-  console.warn('[parser] ❌ Заголовок не найден');
   return -1;
 }
 
@@ -35,11 +31,17 @@ export function parseSpreadsheet(buffer, filename) {
   const isCsv = /\.csv$/i.test(filename);
 
   let workbook;
+
   if (isCsv) {
     const text = buffer.toString('utf-8');
     workbook = XLSX.read(text, { type: 'string' });
   } else {
-    workbook = XLSX.read(buffer, { type: 'buffer', codepage: 65001 });
+    // Читаємо ТІЛЬКИ перші MAX_ROWS+1 рядків
+    workbook = XLSX.read(buffer, {
+      type: 'buffer',
+      codepage: 65001,
+      sheetRows: MAX_ROWS + 1,
+    });
   }
 
   const sheetName = workbook.SheetNames[0];
@@ -54,13 +56,7 @@ export function parseSpreadsheet(buffer, filename) {
     throw new Error('Файл пустой');
   }
 
-  // 🔥 ЛОГИРОВАНИЕ: показываем первые 10 строк матрицы
-  console.log('[parser] Всего строк в матрице:', matrix.length);
-  console.log('[parser] Первые 10 строк матрицы:');
-  for (let i = 0; i < Math.min(10, matrix.length); i++) {
-    console.log(`  строка ${i}:`, matrix[i] ? matrix[i].slice(0, 6) : 'empty');
-  }
-
+  // Знаходимо заголовок
   const headerIndex = findHeaderRow(matrix);
   let headers, dataRows;
 
@@ -72,11 +68,12 @@ export function parseSpreadsheet(buffer, filename) {
     dataRows = matrix.slice(1);
   }
 
+  // Фільтруємо порожні рядки
   dataRows = dataRows.filter((row) =>
     row.some((cell) => String(cell ?? '').trim() !== '')
   );
 
-  const truncated = dataRows.length > MAX_ROWS;
+  // Обрізаємо до MAX_ROWS
   const limitedRows = dataRows.slice(0, MAX_ROWS);
 
   return {
@@ -84,6 +81,6 @@ export function parseSpreadsheet(buffer, filename) {
     headers,
     rows: limitedRows,
     totalRowsInFile: dataRows.length,
-    truncated,
+    truncated: dataRows.length > MAX_ROWS,
   };
 }

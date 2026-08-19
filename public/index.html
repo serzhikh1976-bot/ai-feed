@@ -144,15 +144,37 @@
   }
   .error-box.show { display: block; }
 
-  button.download {
-    margin-top: 16px; width: 100%; padding: 13px; border-radius: 10px;
-    border: 1px solid var(--border); background: transparent; color: var(--muted);
-    font-size: 14px; cursor: not-allowed; transition: all .15s;
+  .download-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
   }
-  button.download:not(:disabled) {
-    cursor: pointer; border-color: var(--success); color: var(--success);
+  .download-row button {
+    flex: 1;
+    padding: 13px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 14px;
+    cursor: not-allowed;
+    transition: all .15s;
   }
-  button.download:not(:disabled):hover { background: #123829; }
+  .download-row button:not(:disabled) {
+    cursor: pointer;
+    border-color: var(--success);
+    color: var(--success);
+  }
+  .download-row button:not(:disabled):hover {
+    background: #123829;
+  }
+  .download-row button#downloadXlsxBtn:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .download-row button#downloadXlsxBtn:not(:disabled):hover {
+    background: #1a2333;
+  }
 </style>
 </head>
 <body>
@@ -171,7 +193,6 @@
     <button id="clearFile">убрать</button>
   </div>
 
-  <!-- ========== НОВИЙ БЛОК – ПОЛЕ КОНТЕКСТУ ========== -->
   <div style="margin-top: 16px;">
     <label for="fileContext" style="display: block; margin-bottom: 6px; font-size: 14px; color: var(--muted);">
       Контекст файлу (необов'язково):
@@ -227,9 +248,10 @@
 
     <div class="log" id="log"></div>
 
-    <button class="download" id="downloadBtn" disabled>
-      Скачать XML-фид
-    </button>
+    <div class="download-row">
+      <button class="download" id="downloadBtn" disabled>Скачать XML-фид</button>
+      <button class="download" id="downloadXlsxBtn" disabled>Скачать XLSX для Prom.ua</button>
+    </div>
   </div>
 </div>
 
@@ -251,6 +273,7 @@ const cWarning = document.getElementById('cWarning');
 const cError = document.getElementById('cError');
 
 const downloadBtn = document.getElementById('downloadBtn');
+const downloadXlsxBtn = document.getElementById('downloadXlsxBtn');
 let selectedFile = null;
 let pollTimer = null;
 let currentRequestId = null;
@@ -334,7 +357,9 @@ uploadBtn.addEventListener('click', async () => {
 function startPolling(requestId, totalItems) {
   currentRequestId = requestId;
   downloadBtn.disabled = true;
+  downloadXlsxBtn.disabled = true;
   downloadBtn.textContent = 'Скачать XML-фид';
+  downloadXlsxBtn.textContent = 'Скачать XLSX для Prom.ua';
   if (pollTimer) clearInterval(pollTimer);
   poll(requestId, totalItems);
   pollTimer = setInterval(() => poll(requestId, totalItems), 2000);
@@ -351,6 +376,7 @@ async function poll(requestId, totalItems) {
     }
     if (job.status === 'completed' && (job.counts.success + job.counts.warning) > 0) {
       downloadBtn.disabled = false;
+      downloadXlsxBtn.disabled = false;
     }
   } catch (err) {
     // network error – wait for next poll
@@ -394,6 +420,11 @@ function escapeHtml(s) {
 downloadBtn.addEventListener('click', () => {
   if (!currentRequestId || downloadBtn.disabled) return;
   window.location.href = `/api/jobs/${currentRequestId}/download`;
+});
+
+downloadXlsxBtn.addEventListener('click', () => {
+  if (!currentRequestId || downloadXlsxBtn.disabled) return;
+  window.location.href = `/api/jobs/${currentRequestId}/download-xlsx`;
 });
 </script>
 </body>
