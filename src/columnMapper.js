@@ -1,23 +1,37 @@
 export const FIELD_KEYWORDS = {
-  sku: ['артикул', 'арт.', 'код', 'sku', 'id', 'номенклатур'],
-  name: ['товар', 'наименование', 'название', 'name', 'номенклатура'],
-  price: ['цена', 'прайс', 'стоимость', 'price', 'розничная'],
-  image: ['картинка', 'фото', 'изображение', 'image', 'photo', 'picture'],
-  description: ['описание', 'характеристик', 'доп. инфо', 'дополнительно', 'технические', 'параметры'],
-  availability: ['наявність', 'наличие', 'кількість', 'количество', 'залишок', 'остаток', 'stock', 'qty', 'склад'],
+  sku: ['артикул', 'арт.', 'код', 'sku', 'id', 'номенклатур', 'код_товару', 'product_id', 'артикул_товару'],
+  name: ['товар', 'наименование', 'название', 'name', 'номенклатура', 'назва_позиції', 'назва_позиції_укр', 'назва_товару'],
+  price: ['цена', 'прайс', 'стоимость', 'price', 'розничная', 'ціна', 'роздрібна', 'ціна_грн'],
+  image: ['картинка', 'фото', 'изображение', 'image', 'photo', 'picture', 'посилання_зображення', 'зображення', 'url_зображення'],
+  description: ['описание', 'характеристик', 'доп. инфо', 'дополнительно', 'технические', 'параметры', 'опис', 'опис_укр', 'повний_опис'],
+  availability: ['наявність', 'наличие', 'кількість', 'количество', 'залишок', 'остаток', 'stock', 'qty', 'склад', 'наявність_на_складі', 'кількість_на_складі'],
+
+  brand: ['бренд', 'виробник', 'manufacturer', 'марка', 'brand', 'торгівельна марка', 'tm', 'торговая марка', 'производитель', 'бренд_товару'],
+  model: ['модель', 'model', 'модифікація', 'variant', 'артикул_модель', 'модель_товару'],
+  color: ['колір', 'цвет', 'colour', 'колер', 'колір_товару', 'кольорова_гама'],
+  size: ['розмір', 'размер', 'size', 'габарити', 'розмір_товару', 'розмір_одягу', 'розмір_взуття'],
+  material: ['матеріал', 'материал', 'material', 'сировина', 'матеріал_виробу', 'склад_матеріалу'],
+  weight: ['вага', 'вес', 'weight', 'маса', 'вага_кг', 'маса_товару'],
+  length: ['довжина', 'длина', 'length', 'довжина_см', 'довжина_товару'],
+  width: ['ширина', 'ширина', 'width', 'ширина_см', 'ширина_товару'],
+  height: ['висота', 'высота', 'height', 'висота_см', 'висота_товару'],
+  unit: ['одиниця виміру', 'одиница измерения', 'unit', 'од.вим.', 'одиниця_виміру', 'одиниця_виміру_товару'],
+  currency: ['валюта', 'currency', 'вал', 'валюта_ціни', 'код_валюти'],
+  seo_title: ['html_заголовок', 'seo_title', 'html_title', 'заголовок_seo', 'seo_заголовок', 'meta_title'],
+  seo_description: ['html_опис', 'seo_description', 'html_description', 'опис_seo', 'seo_опис', 'meta_description'],
+  search_queries: ['пошукові запити', 'search_queries', 'ключові слова', 'keywords', 'ключові_слова', 'пошукові_фрази'],
 };
 
 const REQUIRED_FIELDS = ['sku', 'name', 'price'];
-const ALL_FIELDS = ['sku', 'name', 'price', 'image', 'description', 'availability'];
+const ALL_FIELDS = ['sku', 'name', 'price', 'image', 'description', 'availability',
+  'brand', 'model', 'color', 'size', 'material',
+  'weight', 'length', 'width', 'height', 'unit', 'currency',
+  'seo_title', 'seo_description', 'search_queries'];
 
 function normalizeHeader(h) {
   return String(h ?? '').trim().toLowerCase();
 }
 
-/**
- * Эвристически определяет, какая колонка чем является, на основе первых нескольких строк данных.
- * Возвращает маппинг, если удалось определить хотя бы price, name и sku.
- */
 function guessMappingFromData(rows) {
   if (!rows || rows.length === 0) return null;
 
@@ -51,14 +65,11 @@ function guessMappingFromData(rows) {
 
     if (totalNonEmpty === 0) continue;
 
-    // Вычисляем дополнительные метрики
     const numericRatio = numericCount / totalNonEmpty;
     const decimalRatio = decimalCount / totalNonEmpty;
-    // Разнообразие (чем больше, тем лучше для цены)
     const uniqueValues = new Set(numericValues).size;
     const variety = uniqueValues / Math.max(1, numericValues.length);
-    // Среднее значение (для исключения номеров строк)
-    const avg = numericValues.length > 0 ? numericValues.reduce((a,b) => a+b, 0) / numericValues.length : 0;
+    const avg = numericValues.length > 0 ? numericValues.reduce((a, b) => a + b, 0) / numericValues.length : 0;
 
     stats[col] = {
       hasUrl,
@@ -83,14 +94,12 @@ function guessMappingFromData(rows) {
     }
   }
 
-  // 2. Цена: выбираем колонку с высоким numericRatio, хорошей variety и не с малыми значениями (отсекаем номера строк)
+  // 2. Ціна
   let bestPriceCol = null;
   let bestPriceScore = -1;
   for (const [col, stat] of Object.entries(stats)) {
     const colNum = Number(col);
     if (usedCols.has(colNum)) continue;
-    // Цена должна иметь числа, иметь дробную часть хотя бы в некоторых, и не быть монотонной (разнообразие)
-    // Также исключаем очень маленькие значения (номера строк 1,2,3...)
     if (stat.numericRatio > 0.6 && stat.decimalRatio > 0.1 && stat.variety > 0.5 && stat.avg > 5) {
       const score = stat.numericRatio * 0.3 + stat.decimalRatio * 0.3 + stat.variety * 0.4;
       if (score > bestPriceScore) {
@@ -99,7 +108,6 @@ function guessMappingFromData(rows) {
       }
     }
   }
-  // Если не нашли по строгим условиям, пробуем более мягко (без avg)
   if (bestPriceCol === null) {
     for (const [col, stat] of Object.entries(stats)) {
       const colNum = Number(col);
@@ -118,7 +126,7 @@ function guessMappingFromData(rows) {
     usedCols.add(bestPriceCol);
   }
 
-  // 3. Артикул (короткие числа/буквы, не цена, не URL)
+  // 3. Артикул (короткі числа/букви)
   for (const [col, stat] of Object.entries(stats)) {
     const colNum = Number(col);
     if (usedCols.has(colNum)) continue;
@@ -129,7 +137,7 @@ function guessMappingFromData(rows) {
     }
   }
 
-  // 4. Название (самые длинные строки)
+  // 4. Назва (найдовші строки)
   for (const [col, stat] of Object.entries(stats)) {
     const colNum = Number(col);
     if (usedCols.has(colNum)) continue;
@@ -140,7 +148,7 @@ function guessMappingFromData(rows) {
     }
   }
 
-  // 5. Описание (если не найдено, берём оставшуюся неиспользованную)
+  // 5. Опис
   if (!mapping.description) {
     for (const [col, stat] of Object.entries(stats)) {
       const colNum = Number(col);
@@ -166,7 +174,7 @@ export function mapColumns(headers, dataRows) {
   const mapping = {};
   const guessed = [];
 
-  // Сначала пробуем по ключевым словам
+  // Головний цикл – шукаємо всі поля за ключовими словами
   for (const field of ALL_FIELDS) {
     const keywords = FIELD_KEYWORDS[field];
     const idx = normalized.findIndex((h) => keywords.some((kw) => h.includes(kw)));
@@ -175,13 +183,12 @@ export function mapColumns(headers, dataRows) {
     }
   }
 
-  // Если не все обязательные поля найдены, пробуем эвристику по данным
+  // Якщо не всі обов'язкові поля знайдені – пробуємо евристику
   const missing = REQUIRED_FIELDS.filter((f) => mapping[f] === undefined);
   if (missing.length > 0 && dataRows && dataRows.length > 0) {
     console.log('[columnMapper] Ключевые слова не помогли, пробуем эвристику...');
     const heuristicMapping = guessMappingFromData(dataRows);
     if (heuristicMapping) {
-      // Дополняем маппинг эвристикой, но не перезаписываем уже найденные
       for (const [field, idx] of Object.entries(heuristicMapping)) {
         if (mapping[field] === undefined) {
           mapping[field] = idx;
@@ -191,8 +198,9 @@ export function mapColumns(headers, dataRows) {
     }
   }
 
-  // Позиционный fallback для оставшихся полей
-  ALL_FIELDS.forEach((field, position) => {
+  // Позиційний fallback для обов'язкових полів
+  const requiredFallback = ['sku', 'name', 'price', 'description', 'image', 'availability'];
+  requiredFallback.forEach((field, position) => {
     if (mapping[field] === undefined && position < headers.length) {
       const alreadyUsed = Object.values(mapping).includes(position);
       if (!alreadyUsed) {
@@ -212,14 +220,30 @@ export function mapColumns(headers, dataRows) {
 }
 
 export function applyMapping(rows, mapping) {
-  return rows.map((row) => ({
-    sku: mapping.sku !== undefined ? String(row[mapping.sku] ?? '').trim() : '',
-    name: mapping.name !== undefined ? String(row[mapping.name] ?? '').trim() : '',
-    price: mapping.price !== undefined ? String(row[mapping.price] ?? '').trim() : '',
-    image: mapping.image !== undefined ? String(row[mapping.image] ?? '').trim() : '',
-    description: mapping.description !== undefined ? String(row[mapping.description] ?? '').trim() : '',
-    availability: mapping.availability !== undefined ? String(row[mapping.availability] ?? '').trim() : '',
-  }));
+  return rows.map((row) => {
+    const item = {
+      sku: mapping.sku !== undefined ? String(row[mapping.sku] ?? '').trim() : '',
+      name: mapping.name !== undefined ? String(row[mapping.name] ?? '').trim() : '',
+      price: mapping.price !== undefined ? String(row[mapping.price] ?? '').trim() : '',
+      image: mapping.image !== undefined ? String(row[mapping.image] ?? '').trim() : '',
+      description: mapping.description !== undefined ? String(row[mapping.description] ?? '').trim() : '',
+      availability: mapping.availability !== undefined ? String(row[mapping.availability] ?? '').trim() : '',
+    };
+
+    // Додаткові поля – всі вони вже знайдені в головному циклі
+    const extraFields = ['brand', 'model', 'color', 'size', 'material', 'weight', 'length', 'width', 'height', 'unit', 'currency', 'seo_title', 'seo_description', 'search_queries'];
+    for (const field of extraFields) {
+      if (mapping[field] !== undefined) {
+        item[field] = String(row[mapping[field]] ?? '').trim();
+      } else {
+        item[field] = '';
+      }
+    }
+
+    item._rawRow = row.map(cell => String(cell ?? '').trim());
+
+    return item;
+  });
 }
 
 const URL_RE = /^https?:\/\/\S+$/i;
@@ -229,35 +253,16 @@ export function isValidImageUrl(value) {
 }
 
 const IMAGE_EXTENSION_RE = /\.(jpe?g|png|webp|gif|bmp|svg)(\?\S*)?$/i;
-// Частые паттерны страниц ТОВАРА (не картинки) — если колонку "image" пришлось угадывать
-// (не подписана явно поставщиком как "Фото"/"Картинка"), такая ссылка с высокой вероятностью
-// ведёт на страницу товара у поставщика, а не на файл изображения (см. реальный кейс:
-// колонка "URL" со ссылками вида .../product/nazva-tovaru/ — это карточка товара на сайте
-// поставщика, не фото; попадание такой ссылки в <picture> тихо портит фид).
 const GENERIC_PAGE_PATTERN_RE = /\/(product|tovar|item|p|catalog|category)\//i;
 
-/**
- * Более строгая проверка — используется, когда колонка картинки была определена
- * НЕ по явному ключевому слову в заголовке (см. mapColumns → guessed), а угадана
- * позиционно/эвристикой по данным. В таком случае доверять "это просто похоже на URL"
- * недостаточно — нужно ещё убедиться, что это похоже именно на файл изображения,
- * а не на случайно попавшую в эту колонку ссылку на страницу товара.
- */
 export function isConfidentImageUrl(value) {
   const url = String(value ?? '').trim();
   if (!isValidImageUrl(url)) return false;
   if (IMAGE_EXTENSION_RE.test(url)) return true;
   if (GENERIC_PAGE_PATTERN_RE.test(url)) return false;
-  // Нет расширения картинки, но и не похоже на страницу товара (например, некоторые
-  // CDN отдают картинки без расширения в пути) — не отклоняем однозначно, но и не
-  // считаем подтверждённым; вызывающий код должен трактовать это как неопределённость.
   return null;
 }
 
-/**
- * Перевіряє, чи URL веде безпосередньо на файл зображення (за розширенням).
- * Повертає true, якщо URL закінчується на .jpg, .jpeg, .png, .gif, .webp, .svg
- */
 export function isDirectImageUrl(url) {
   if (!url || typeof url !== 'string') return false;
   return /\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i.test(url.trim());

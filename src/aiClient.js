@@ -74,6 +74,7 @@ export async function generateProductContent(item, {
   fileContext = '',
   productType = '',
   descriptionRequirements = '',
+  extraFields = {},
 } = {}) {
   const prompt = buildProductPrompt(item, {
     brand,
@@ -81,6 +82,7 @@ export async function generateProductContent(item, {
     fileContext,
     productType,
     descriptionRequirements,
+    extraFields,
   });
   const callFn = getProviderFn(provider);
 
@@ -103,11 +105,11 @@ export async function generateProductContent(item, {
   throw new Error(`Не удалось получить корректный ответ от ИИ после ${maxAttempts} попыток. Последняя ошибка: ${lastError.message}`);
 }
 
-export async function selectCategory(generatedName, generatedDescription, candidates, { provider, apiKey, model, fileContext = '' } = {}) {
+export async function selectCategory(generatedName, generatedDescription, candidates, { provider, apiKey, model, fileContext = '', extraFields = {} } = {}) {
   if (candidates.length === 0) {
     throw new Error('Список кандидатов категорий пуст — нечего выбирать');
   }
-  const prompt = buildCategorySelectionPrompt(generatedName, generatedDescription, candidates, fileContext);
+  const prompt = buildCategorySelectionPrompt(generatedName, generatedDescription, candidates, fileContext, extraFields);
   const callFn = getProviderFn(provider);
   const validIds = new Set(candidates.map((c) => c.id));
 

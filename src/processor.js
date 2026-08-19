@@ -130,7 +130,7 @@ function resolveAvailability(raw, { wholeColumnEmpty = false } = {}) {
   };
 }
 
-async function resolveCategory(generated, raw, fileContext = "") {
+async function resolveCategory(generated, raw, fileContext = "", extraFields = {}) {
   if (!categoryDirStatus.available) {
     return {
       categoryId: DEFAULT_CATEGORY_ID,
@@ -140,7 +140,14 @@ async function resolveCategory(generated, raw, fileContext = "") {
     };
   }
 
-  const productText = `${generated.name} ${generated.description}`;
+  // Додаємо extraFields у текст для пошуку категорії
+  const extraText = Object.entries(extraFields)
+    .filter(([_, value]) => value && String(value).trim() !== '')
+    .map(([key, value]) => `${key}: ${value}`)
+    .join(' ');
+
+  const productText = `${generated.name} ${generated.description} ${extraText}`;
+  
   let candidates = getBranchCandidates(
     productText,
     CATEGORY_FILE,
@@ -173,6 +180,7 @@ async function resolveCategory(generated, raw, fileContext = "") {
         apiKey: AI_CONFIG.apiKey,
         model: AI_CONFIG.model,
         fileContext: fileContext,
+        extraFields: extraFields, // <-- передаємо extraFields у другий запит
       },
     );
     const chosen = candidates.find((c) => c.id === categoryId);
@@ -225,6 +233,23 @@ export async function processJob(jobId, { imageColumnGuessed = false } = {}) {
       );
 
       try {
+        const extraFields = {
+          brand: raw.brand || '',
+          model: raw.model || '',
+          color: raw.color || '',
+          size: raw.size || '',
+          material: raw.material || '',
+          weight: raw.weight || '',
+          length: raw.length || '',
+          width: raw.width || '',
+          height: raw.height || '',
+          unit: raw.unit || '',
+          currency: raw.currency || '',
+          seoTitle: raw.seo_title || '',
+          seoDescription: raw.seo_description || '',
+          searchQueries: raw.search_queries || '',
+        };
+
         const generated = await generateProductContent(raw, {
           brand: globalBrand,
           topLevelCategories,
@@ -234,11 +259,28 @@ export async function processJob(jobId, { imageColumnGuessed = false } = {}) {
           fileContext: context,
           productType,
           descriptionRequirements,
+          extraFields,
         });
-        await sleep(INTRA_ITEM_DELAY_MS);
-        const categoryResult = await resolveCategory(generated, raw, context);
 
-        // Принудительная подстановка бренда, если задан пользователем
+        // ===== ПОСТ-ОБРОБКА НАЗВИ =====
+        let cleanName = generated.name;
+        if (raw.sku && cleanName.includes(raw.sku)) {
+          cleanName = cleanName.replace(raw.sku, '').trim();
+          cleanName = cleanName.replace(/\s+/g, ' ').replace(/-\s*$/, '').trim();
+        }
+        if (cleanName.includes('No Name')) {
+          cleanName = cleanName.replace('No Name', '').trim();
+          cleanName = cleanName.replace(/\s+/g, ' ').trim();
+        }
+        if (!cleanName || cleanName.length < 3) {
+          cleanName = raw.name.replace(raw.sku || '', '').trim();
+        }
+        generated.name = cleanName;
+        // ===== КІНЕЦЬ ПОСТ-ОБРОБКИ =====
+
+        await sleep(INTRA_ITEM_DELAY_MS);
+        const categoryResult = await resolveCategory(generated, raw, context, extraFields);
+
         let vendorValue = generated.vendor;
         if (globalBrand && (!vendorValue || vendorValue === 'No Name')) {
           vendorValue = globalBrand;
