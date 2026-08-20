@@ -26,66 +26,43 @@ fastify.get('/api/health', async () => ({ ok: true }));
 fastify.post('/api/upload', async (request, reply) => {
   console.log('📥 [upload] Запит отримано');
 
-  let file;
+  let fileBuffer = null;
+  let filename = null;
   const fields = {};
+
   console.log('⏳ [upload] Початок циклу обробки частин...');
-
-  // Таймаут на читання частин (10 секунд)
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Timeout reading multipart parts')), 10000)
-  );
-
-  const partsPromise = (async () => {
-    let partCount = 0;
-    for await (const part of request.parts()) {
-      partCount++;
-      console.log(`🔍 [upload] Частина #${partCount}, fieldname: ${part.fieldname}`);
-      if (part.fieldname === 'file') {
-        file = part;
-        console.log(`📎 [upload] Знайдено файл: ${file.filename}`);
-      } else {
-        fields[part.fieldname] = part.value;
-        console.log(`📝 [upload] Поле: ${part.fieldname} = ${part.value}`);
-      }
+  let partCount = 0;
+  for await (const part of request.parts()) {
+    partCount++;
+    console.log(`🔍 [upload] Частина #${partCount}, fieldname: ${part.fieldname}`);
+    if (part.fieldname === 'file') {
+      filename = part.filename;
+      // ✅ КРИТИЧНО: читаємо потік НЕГАЙНО, щоб розблокувати парсер
+      fileBuffer = await part.toBuffer();
+      console.log(`📎 [upload] Знайдено файл: ${filename}, розмір: ${fileBuffer.length} байт`);
+    } else {
+      fields[part.fieldname] = part.value;
+      console.log(`📝 [upload] Поле: ${part.fieldname} = ${part.value}`);
     }
-    console.log(`✅ [upload] Цикл завершено, оброблено ${partCount} частин`);
-  })();
-
-  try {
-    await Promise.race([partsPromise, timeoutPromise]);
-  } catch (err) {
-    console.error('❌ [upload] Помилка або таймаут читання частин:', err.message);
-    return reply.code(400).send({
-      error: 'Не удалось прочитать файл: возможно, файл поврежден, слишком велик или имеет нестандартный формат. Попробуйте сохранить файл заново или конвертировать в CSV.'
-    });
   }
+  console.log(`✅ [upload] Цикл завершено, оброблено ${partCount} частин`);
 
-  if (!file) {
+  if (!fileBuffer) {
     console.error('❌ [upload] Файл не передано');
     return reply.code(400).send({ error: 'Файл не передан' });
   }
 
-  const filename = file.filename;
+  // Перевірка формату
   const isSupported = /\.(csv|xlsx|xls)$/i.test(filename);
   if (!isSupported) {
     console.error('❌ [upload] Непідтримуваний формат:', filename);
     return reply.code(400).send({ error: 'Поддерживаются только форматы .xlsx, .xls, .csv' });
   }
 
-  console.log('⏳ [upload] Читання файлу в буфер...');
-  let buffer;
-  try {
-    buffer = await file.toBuffer();
-    console.log(`✅ [upload] Файл прочитано, розмір: ${buffer.length} байт`);
-  } catch (err) {
-    console.error('❌ [upload] Помилка читання файлу:', err.message);
-    return reply.code(400).send({ error: `Не удалось прочитать файл: ${err.message}` });
-  }
-
   console.log('⏳ [upload] Починаємо парсинг...');
   let parsed;
   try {
-    parsed = parseSpreadsheet(buffer, filename);
+    parsed = parseSpreadsheet(fileBuffer, filename);
     console.log(`✅ [upload] Парсинг завершено, знайдено рядків: ${parsed.rows.length}, заголовків: ${parsed.headers.length}`);
   } catch (err) {
     console.error('❌ [upload] Помилка парсингу:', err.message);

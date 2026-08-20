@@ -1,5 +1,7 @@
 import * as XLSX from 'xlsx';
 
+const MAX_PARAMS = 20; // максимальна кількість характеристик, які експортуємо
+
 export function buildXlsxFeed(job, opts = {}) {
   const defaultCategoryId = opts.defaultCategoryId || '1';
   const includedItems = job.items.filter(
@@ -10,8 +12,8 @@ export function buildXlsxFeed(job, opts = {}) {
     throw new Error('Немає товарів для експорту');
   }
 
-  // Колонки у точному порядку та з назвами з офіційного шаблону
-  const columns = [
+  // Базові колонки (без характеристик)
+  const baseColumns = [
     { key: 'sku', header: 'Код_товару' },
     { key: 'name', header: 'Назва_позиції' },
     { key: 'name_ua', header: 'Назва_позиції_укр' },
@@ -29,9 +31,9 @@ export function buildXlsxFeed(job, opts = {}) {
     { key: 'image', header: 'Посилання_зображення' },
     { key: 'availability', header: 'Наявність' },
     { key: 'quantity', header: 'Кількість' },
-    { key: 'group_id', header: 'Номер_групи' },
+    { key: 'group_url', header: 'Посилання_підрозділу' }, // ← ОСНОВНЕ ДЛЯ КАТЕГОРІЇ
+    { key: 'group_id', header: 'Номер_групи' }, // залишаємо, але не заповнюємо
     { key: 'group_name', header: 'Назва_групи' },
-    { key: 'group_url', header: 'Посилання_підрозділу' },
     { key: 'delivery_possible', header: 'Можливість_поставки' },
     { key: 'delivery_time', header: 'Термін_поставки' },
     { key: 'packaging', header: 'Спосіб_пакування' },
@@ -39,7 +41,7 @@ export function buildXlsxFeed(job, opts = {}) {
     { key: 'unique_id', header: 'Унікальний_ідентифікатор' },
     { key: 'product_id', header: 'Ідентифікатор_товару' },
     { key: 'subdivision_id', header: 'Ідентифікатор_підрозділу' },
-    { key: 'category_id', header: 'Ідентифікатор_групи' },
+    { key: 'category_id', header: 'Ідентифікатор_групи' }, // залишаємо, але не заповнюємо
     { key: 'brand', header: 'Виробник' },
     { key: 'country', header: 'Країна_виробник' },
     { key: 'discount', header: 'Знижка' },
@@ -67,18 +69,32 @@ export function buildXlsxFeed(job, opts = {}) {
     { key: 'location', header: 'Де_знаходиться_товар' },
     { key: 'to_delete', header: 'Товар_на_видалення' },
     { key: 'delete_reason', header: 'Причина_видалення_товару' },
-    // Далі можна додати блоки характеристик, але поки пропустимо
   ];
 
+  // Генеруємо колонки для характеристик (трійки)
+  const paramColumns = [];
+  for (let i = 0; i < MAX_PARAMS; i++) {
+    const suffix = i === 0 ? '' : `_${i + 1}`;
+    paramColumns.push(
+      { key: `param_name_${i}`, header: `Назва_Характеристики${suffix}` },
+      { key: `param_unit_${i}`, header: `Одиниця_виміру_Характеристики${suffix}` },
+      { key: `param_value_${i}`, header: `Значення_Характеристики${suffix}` },
+    );
+  }
+
+  const allColumns = [...baseColumns, ...paramColumns];
+
   const rows = includedItems.map((item) => {
-    // Отримуємо значення для кожної колонки
+    const params = item.generatedParams || [];
+
+    // Функція для отримання значення
     const getVal = (key) => {
       switch (key) {
         case 'sku': return item.sku || '';
         case 'name': return item.generatedName || item.name || '';
         case 'name_ua': return item.generatedName || item.name || '';
         case 'search_queries': return item.searchQueries || '';
-        case 'search_queries_ru': return item.searchQueries || ''; // або переклад
+        case 'search_queries_ru': return item.searchQueries || '';
         case 'description': return item.generatedDescription || item.description || '';
         case 'description_ua': return item.generatedDescription || item.description || '';
         case 'product_type': return '';
@@ -90,10 +106,10 @@ export function buildXlsxFeed(job, opts = {}) {
         case 'min_wholesale': return '';
         case 'image': return item.resolvedImage || '';
         case 'availability': return item.available ? '+' : '-';
-        case 'quantity': return ''; // можна поставити 1, але поки пусто
-        case 'group_id': return item.categoryId || defaultCategoryId;
+        case 'quantity': return '';
+        case 'group_url': return item.categoryUrl || ''; // ← ОСНОВНЕ: URL категорії
+        case 'group_id': return ''; // не заповнюємо
         case 'group_name': return item.categoryPath?.length ? item.categoryPath[item.categoryPath.length - 1] : '';
-        case 'group_url': return '';
         case 'delivery_possible': return '';
         case 'delivery_time': return '';
         case 'packaging': return '';
@@ -101,9 +117,9 @@ export function buildXlsxFeed(job, opts = {}) {
         case 'unique_id': return '';
         case 'product_id': return item.sku || '';
         case 'subdivision_id': return '';
-        case 'category_id': return item.categoryId || defaultCategoryId;
-        case 'brand': return item.vendor || item.brand || '';
-        case 'country': return '';
+        case 'category_id': return ''; // не заповнюємо
+        case 'brand': return item.vendor || item.brand || 'No Name';
+        case 'country': return item.country || '';
         case 'discount': return '';
         case 'variant_group_id': return '';
         case 'notes': return '';
@@ -133,22 +149,28 @@ export function buildXlsxFeed(job, opts = {}) {
       }
     };
 
+    // Заповнюємо характеристики
+    const paramRow = {};
+    for (let i = 0; i < MAX_PARAMS; i++) {
+      const p = params[i] || {};
+      paramRow[`param_name_${i}`] = p.name || '';
+      paramRow[`param_unit_${i}`] = ''; // одиниці виміру поки не підтримуємо
+      paramRow[`param_value_${i}`] = p.value || '';
+    }
+
     const row = {};
-    columns.forEach((col) => {
+    baseColumns.forEach((col) => {
       row[col.header] = getVal(col.key);
     });
+    // Додаємо характеристики до рядка
+    Object.assign(row, paramRow);
+
     return row;
   });
 
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows, { header: columns.map((c) => c.header) });
-  ws['!cols'] = columns.map(() => ({ wch: 20 }));
-
-  // ВАЖЛИВО: назва аркуша має збігатися з офіційним шаблоном
+  const ws = XLSX.utils.json_to_sheet(rows, { header: allColumns.map((c) => c.header) });
+  ws['!cols'] = allColumns.map(() => ({ wch: 20 }));
   XLSX.utils.book_append_sheet(wb, ws, 'Export Products Sheet');
-
-  // Другий аркуш не обов'язковий, але якщо хочете – можна додати порожній
-  // Зараз залишаємо тільки один аркуш
-
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }

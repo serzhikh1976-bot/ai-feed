@@ -1,10 +1,6 @@
 import * as XLSX from 'xlsx';
 import fs from 'node:fs';
 
-// Справочник категорий Prom.ua: 4-уровневая иерархия, последний непустой уровень —
-// это лист (реальная категория для categoryId), остальные — хлебные крошки.
-// Формат файла: Категория1..4, Адрес_подраздела (URL), Идентификатор_подраздела (ID).
-
 let cachedCategories = null;
 
 function loadCategoriesFromFile(filePath) {
@@ -23,6 +19,7 @@ function loadCategoriesFromFile(filePath) {
         path,
         leafName: path[path.length - 1] || '',
         searchText: normalize(path.join(' ')),
+        url: String(r[4] || '').trim(), // Адрес_подраздела — колонка 4
       };
     });
 }
@@ -30,31 +27,20 @@ function loadCategoriesFromFile(filePath) {
 function normalize(text) {
   return String(text)
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ') // убираем пунктуацию, оставляем буквы/цифры
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-// Небольшой словарь известных вариантов написания одного и того же товара/термина
-// (транслитерации, разговорные формы vs официальные в каталоге). Не претендует на полноту —
-// это список конкретных случаев, найденных на реальных тестовых данных; расширять по мере
-// обнаружения новых расхождений. Ключ и значение — оба проверяются при поиске.
 const SYNONYM_GROUPS = [
   ['павербанк', 'повербанк', 'пауербанк'],
   ['зарядка', 'зарядне', 'зарядний', 'зарядного', 'зарядные'],
   ['худі', 'худи', 'світшот', 'свитшот', 'толстовка', 'светр', 'кофта', 'кардиган'],
-  // USB-кабелі та зарядні шнури → аксесуари для мобільних телефонів
   ['кабель', 'шнур', 'дріт', 'провід', 'зарядний кабель', 'usb', 'type-c', 'micro usb', 'аксесуари'],
-  // Монітори — окрема гілка від телевізорів
   ['монітор', 'дисплей', 'екран', 'display', 'monitor'],
-  // Мережевий фільтр / подовжувач → Електрообладнання > Електричні подовжувачі
   ['мережевий фільтр', 'подовжувач електричний', 'фільтр живлення', 'електричний подовжувач', 'подовжувач', 'мережевий'],
 ];
 
-// Небольшой стеммер для сравнения по корню слова, а не по фиксированной длине префикса.
-// Фиксированная длина префикса ломается на коротких словах, где расхождение словоформы
-// попадает уже в первые 5-6 букв (например, "куртка"/"куртки" — оба 6 букв, отличаются
-// только последней). Отсечение типичных окончаний существительных надёжнее в таких случаях.
 const NOUN_SUFFIXES = ['ами', 'ями', 'ості', 'ення', 'ання', 'ів', 'ий', 'ій', 'а', 'я', 'и', 'і', 'у', 'ю', 'о', 'е']
   .sort((a, b) => b.length - a.length);
 
@@ -82,11 +68,9 @@ function expandSynonyms(tokens) {
 function tokenize(text) {
   return normalize(text)
     .split(' ')
-    .filter((t) => t.length >= 4); // отсекаем короткие союзы/предлоги и мусорные 3-буквенные обрубки
+    .filter((t) => t.length >= 4);
 }
 
-/** true, если token встречается в text как отдельное слово (по границам), а не как случайная подстрока
- *  внутри другого слова (иначе "сет" ложно матчится внутри "касети", "футбол" — внутри "футболка"). */
 function hasWholeWordMatch(text, token) {
   const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}([^\\p{L}\\p{N}]|$)`, 'u');
@@ -109,7 +93,6 @@ export function getCategoryDirectoryStatus(filePath) {
   }
 }
 
-/** Список уникальных top-level категорий (у Prom.ua их 58) — передаётся ИИ как фиксированный enum. */
 export function getTopLevelCategories(filePath) {
   const categories = loadCategoryDirectory(filePath);
   return [...new Set(categories.map((c) => c.path[0]))].sort();
@@ -137,13 +120,13 @@ function scoreCategories(categories, productText) {
     let score = 0;
     for (const { token: qt, stem: qStem } of queryTokens) {
       if (hasWholeWordMatch(leafNorm, qt)) {
-        score += 3; // точное совпадение целого слова в листовой категории — самый сильный сигнал
+        score += 3;
       } else if (hasWholeWordMatch(fullNorm, qt)) {
-        score += 1; // точное совпадение где-то в хлебных крошках
+        score += 1;
       } else if (qt.length >= 5 && hasStemMatch(leafWords, qStem)) {
-        score += 2; // совпадение по корню слова в листовой категории (словоформа: куртка/куртки)
+        score += 2;
       } else if (qt.length >= 5 && hasStemMatch(fullWords, qStem)) {
-        score += 0.5; // совпадение по корню где-то в хлебных крошках — слабый сигнал
+        score += 0.5;
       }
     }
     return { cat, score };
@@ -152,12 +135,6 @@ function scoreCategories(categories, productText) {
   return scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
 }
 
-/**
- * Отбирает top-N кандидатов категорий под товар по пересечению ключевых слов
- * названия+описания с полным путём категории (leaf-название весит больше, чем
- * верхние уровни иерархии — совпадение в конкретном подразделе значимее, чем
- * в общем разделе типа "Техніка та електроніка").
- */
 export function getCategoryCandidates(productText, filePath, limit = 20) {
   const categories = loadCategoryDirectory(filePath);
   const ranked = scoreCategories(categories, productText);
@@ -166,22 +143,15 @@ export function getCategoryCandidates(productText, filePath, limit = 20) {
   return topCandidates;
 }
 
-/**
- * Кандидаты внутри ОДНОЙ top-level ветки (подсказанной ИИ в первом вызове — см. ТЗ,
- * без второго обращения на этом шаге). Внутри узкой ветки (50-300 категорий вместо 5822)
- * список короче и точнее, что делает второй (уже category-only) AI-вызов дешевле.
- */
 export function getBranchCandidates(productText, filePath, topLevel, limit = 12) {
   const categories = loadCategoryDirectory(filePath);
   const branchCategories = categories.filter((c) => c.path[0] === topLevel);
-  if (branchCategories.length === 0) return []; // ИИ вернул несуществующую ветку — откат на caller
+  if (branchCategories.length === 0) return [];
 
   const ranked = scoreCategories(branchCategories, productText);
   const topCandidates = ranked.slice(0, limit).map((s) => s.cat);
   addGenericFallback(topCandidates, branchCategories, topLevel);
 
-  // Если вообще ничего не совпало по ключевым словам — не отдаём пустой список,
-  // отдаём хотя бы общие категории ветки, чтобы ИИ было из чего выбрать.
   if (topCandidates.length === 0) {
     const generic = branchCategories.filter((c) => /загальне/i.test(c.leafName));
     const groups = {};
@@ -211,7 +181,6 @@ function addGenericFallback(topCandidates, poolCategories, forcedTopLevel = null
   }
 }
 
-/** Оставлено для обратной совместимости / отладки (полный поиск по всему справочнику без ветки). */
 export function getBestCategoryInBranch(productText, filePath, topLevel) {
   const candidates = getBranchCandidates(productText, filePath, topLevel, 1);
   return candidates[0] || null;
